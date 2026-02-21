@@ -8,7 +8,7 @@ const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: 'TaskChain - Secure Freelance Platform with Blockchain Escrow',
+  title: 'TaskChain',
   description: 'Web3-powered freelance marketplace with escrow-based payments on Stellar blockchain. Protect your work and payments with smart contract security.',
   generator: 'v0.app',
   icons: {
