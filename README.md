@@ -2,154 +2,158 @@
 
 **Freelance with Confidence. Get Paid Securely.**
 
-TaskChain is a **Web3-powered freelancing platform** built on the **Stellar blockchain**, designed to protect both freelancers and clients using **blockchain-based escrow payments**, **milestone tracking**, and **transparent dispute resolution**.
+TaskChain is a **Web3-powered freelancing platform** built on the **Stellar blockchain**. It is designed to protect both freelancers and clients using **blockchain-based escrow payments**, **milestone tracking**, and **transparent dispute resolution**.
+
+By leveraging Stellar's fast and low-cost network, TaskChain ensures that payments are secure, transparent, and instant, removing the need for traditional intermediaries and high platform fees.
 
 ---
 
-## 🌐 Live Concept
+## 🌐 Project Overview
 
-TaskChain reimagines freelancing by removing trust issues:
+TaskChain reimagines the freelancing experience by solving the core issue of trust.
 
-* Clients only pay when work meets expectations
-* Freelancers are guaranteed payment through escrow
-* Zero platform fees
-* Instant blockchain-based payouts
-
----
-
-## ✨ Key Features
-
-### 🔐 Escrow Protection
-
-Funds are locked in blockchain smart contracts and released only when work is approved by both parties.
-
-### ⚡ Instant Payments
-
-No delays, no waiting periods — freelancers receive funds immediately upon project completion.
-
-### 🔗 Blockchain Security
-
-Built on the Stellar blockchain for fast, transparent, and immutable transactions.
-
-### 🧩 Milestone Tracking
-
-Break projects into milestones with automated escrow release on completion.
-
-### ⚖️ Dispute Resolution
-
-Fair and transparent dispute resolution system to protect both clients and freelancers.
-
-### ⭐ Verified Review System
-
-Build trust and reputation with verified reviews from completed projects.
-
-### 💸 Zero Platform Fees
-
-Freelancers keep **100% of their earnings**.
+- **Trustless Escrow**: Payments are held in smart contracts and only released when milestones are met.
+- **Instant Payouts**: Once approved, funds are transferred instantly via the Stellar network.
+- **Zero Platform Fees**: We believe freelancers should keep what they earn.
+- **Transparent Track Record**: All reviews and project histories are stored on the blockchain, ensuring a verified reputation system.
 
 ---
 
-## 🛠 How It Works
-
-1. **Find or Post Work**
-   Clients post jobs, freelancers browse and submit proposals.
-
-2. **Accept Proposal**
-   Clients review proposals and select the best match.
-
-3. **Funds Escrowed**
-   Payments are securely locked in a Stellar smart contract.
-
-4. **Complete & Release**
-   Work is delivered, reviewed, and funds are automatically released.
-
----
-
-## 👥 Built for Everyone
-
-### 🧑‍💻 For Freelancers
-
-* Instant payments after approval
-* No platform fees
-* Guaranteed payment via escrow
-* Reputation building with verified reviews
-* Fair dispute resolution
-
-### 🧑‍💼 For Clients
-
-* Pay only when satisfied
-* Secure escrow protection
-* Access to verified freelancers
-* Milestone-based payments
-* Transparent pricing with no hidden fees
-
----
-
-## 🖥 Tech Stack
+## 🛠 Tech Stack
 
 ### Frontend
 
-* Next.js / React
-* Tailwind CSS
-* Modern UI with gradients & animations
+- **Framework**: [Next.js 15](https://nextjs.org/) (App Router)
+- **Styling**: [Tailwind CSS](https://tailwindcss.com/)
+- **UI Components**: [Radix UI](https://www.radix-ui.com/) & [Shadcn UI](https://ui.shadcn.com/)
+- **Icons**: [Lucide React](https://lucide.dev/)
+- **State Management/Forms**: [React Hook Form](https://react-hook-form.com/) & [Zod](https://zod.dev/)
 
-### Blockchain
+### Backend & Database
 
-* Stellar Blockchain
-* Smart contract–based escrow system
+- **Database**: [Neon Postgres](https://neon.tech/) (Serverless)
+- **ORM/Query Builder**: `@neondatabase/serverless`
+- **Deployment**: [Vercel](https://vercel.com/)
 
-### Backend (Planned / In Progress)
+### Blockchain (Stellar)
 
-* Node.js / API layer
-* Wallet integration
-* Milestone & escrow logic
+- **Network**: Stellar (Testnet/Mainnet)
+- **Contracts**: Soroban Smart Contracts (Planned)
+- **Integration**: `stellar-sdk` (Planned)
 
 ---
 
-## 🧠 Project Vision
+## 📂 Folder Structure
 
-TaskChain aims to become a **trust-first freelancing ecosystem** where:
+```text
+task_chain/
+├── app/                # Next.js App Router pages and global styles
+├── components/         # Reusable UI components
+│   └── ui/             # shadcn/ui primitive components
+├── lib/                # Shared utilities and database configuration
+├── public/             # Static assets (images, icons, etc.)
+├── scripts/            # Database migrations and helper scripts
+├── styles/             # Global CSS and theme configurations
+├── .env.example        # Template for environment variables
+├── package.json        # Project dependencies and scripts
+└── tsconfig.json       # TypeScript configuration
+```
 
-* Freelancers never chase payments
-* Clients never worry about quality
-* Blockchain replaces intermediaries
-* Transparency is built-in by design
+### Key Directories
+
+- **`app/`**: Contains the main application routes. Currently features a high-conversion landing page.
+- **`components/`**: Houses all React components. Components are organized by feature (e.g., `hero.tsx`, `features.tsx`).
+- **`lib/`**: Includes `db.ts` for Neon database connection and `utils.ts` for Tailwind merging.
+- **`scripts/`**: Contains SQL migration files like `001-create-tables.sql` for setting up the database schema.
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+
+- **Node.js**: v18 or later
+- **npm / pnpm / yarn**
+- **Neon Database Account**: For Postgres storage.
+
+### Installation
+
+1. **Clone the repository:**
+
+   ```bash
+   git clone https://github.com/your-username/task_chain.git
+   cd task_chain
+   ```
+
+2. **Install dependencies:**
+
+   ```bash
+   pnpm install
+   # or
+   npm install
+   ```
+
+3. **Set up environment variables:**
+   Copy `.env.example` to `.env` and fill in your database credentials.
+
+   ```bash
+   cp env.example .env
+   ```
+
+   Update `.env`:
+
+   ```env
+   DATABASE_URL=postgres://user:password@hostname/dbname
+   ```
+
+4. **Initialize the database:**
+   Run the migration script located in `scripts/001-create-tables.sql` against your Neon database instance.
+
+5. **Run the development server:**
+
+   ```bash
+   pnpm dev
+   # or
+   npm run dev
+   ```
+
+6. **Open the browser:**
+   Navigate to [http://localhost:3000](http://localhost:3000) to see the application.
 
 ---
 
 ## 🛣 Roadmap
 
-* [ ] Wallet authentication (Stellar)
-* [ ] Smart contract escrow integration
-* [ ] Milestone-based contracts
-* [ ] Dispute resolution logic
-* [ ] Freelancer profiles & verification
-* [ ] Client dashboards
-* [ ] DAO-based governance (future)
+- [ ] **Phase 1**: Wallet authentication (Stellar/Freighter integration)
+- [ ] **Phase 2**: Smart contract escrow integration (Soroban)
+- [ ] **Phase 3**: Milestone-based contracts & dashboard
+- [ ] **Phase 4**: Dispute resolution logic & DAO governance
+- [ ] **Phase 5**: Freelancer profiles & verification system
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome!
-Feel free to:
+We welcome contributions from the community!
 
-* Open issues
-* Suggest improvements
-* Submit pull requests
-* Improve UI/UX
-* Enhance documentation
+1. **Fork** the repository.
+2. **Create a branch**: `git checkout -b feature/your-feature-name`.
+3. **Commit changes**: `git commit -m 'Add some feature'`.
+4. **Push to branch**: `git push origin feature/your-feature-name`.
+5. **Open a Pull Request**.
+
+Please ensure your code follows the existing style and includes proper documentation.
 
 ---
 
 ## 📄 License
 
-This project is licensed under the **MIT License**.
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
 
 ---
 
-## 🌟 Get Started
+## 🌟 Support
 
-If you like the vision, **star the repo ⭐** and help us build the future of secure freelancing.
+If you like the vision of TaskChain, **star the repo ⭐** and join us in building the future of secure freelancing.
 
 > **TaskChain — Where Freelancing Meets Trust.**
