@@ -1,0 +1,89 @@
+name: PR Description Validation
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  validate-pr-description:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate PR Description
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const body = pr.body || '';
+            
+            // Check if description is empty
+            if (!body || body.trim().length === 0) {
+              core.setFailed(' PR description is required and cannot be empty');
+              return;
+            }
+            
+            // Check minimum length (100 characters)
+            if (body.trim().length < 100) {
+              core.setFailed('PR description must be at least 100 characters long');
+              return;
+            }
+            
+            // Check for required sections
+            const requiredSections = ['## What', '## Why', '## How'];
+            const missingSections = [];
+            
+            requiredSections.forEach(section => {
+              if (!body.includes(section)) {
+                missingSections.push(section);
+              }
+            });
+            
+            if (missingSections.length > 0) {
+              core.setFailed(` PR description must include these sections: ${missingSections.join(', ')}`);
+              return;
+            }
+            
+            // If all checks pass
+            core.info(' PR description is valid');
+            
+            // Add comment with validation result
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: ' PR description validated successfully!'
+            });
+
+      - name: Comment on validation failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = '### PR Description Validation Failed \n\n' +
+              'Please update your PR description to include:\n' +
+              '- **Minimum 100 characters** of description\n' +
+              '- **## What** section - What does this PR do?\n' +
+              '- **## Why** section - Why is this change needed?\n' +
+              '- **## How** section - How does it accomplish the goal?\n\n' +
+              'Example format:\n' +
+              '```\n' +
+              '## What\n' +
+              'This PR adds a new authentication system that...\n\n' +
+              '## Why\n' +
+              'The current authentication system has X limitations that...\n\n' +
+              '## How\n' +
+              'We implemented Y by using Z approach...\n' +
+              '```';
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
