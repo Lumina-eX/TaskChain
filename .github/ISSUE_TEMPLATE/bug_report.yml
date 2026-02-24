@@ -1,0 +1,93 @@
+name: 🐛 Bug Report
+description: Report a reproducible bug to help us improve TaskChain.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report! Please fill out this form as completely as possible.
+        > ⚠️ Before submitting, please check [existing issues](../issues) to avoid duplicates.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: "📋 Describe the Bug"
+      description: A clear and concise description of what the bug is.
+      placeholder: "When I click on X, Y happens instead of Z..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: "🔢 Steps to Reproduce"
+      description: Provide step-by-step instructions to reproduce the behavior.
+      placeholder: |
+        1. Go to '...'
+        2. Click on '...'
+        3. Scroll down to '...'
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: "✅ Expected Behavior"
+      description: What did you expect to happen?
+      placeholder: "I expected the button to..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: "❌ Actual Behavior"
+      description: What actually happened?
+      placeholder: "Instead, the page crashed with..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: "📸 Screenshots / Logs"
+      description: If applicable, add screenshots or paste error logs to help explain the problem.
+      placeholder: "Drag and drop images here, or paste logs..."
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: "🔥 Severity"
+      description: How severe is this bug?
+      options:
+        - "Critical — Application crash or data loss"
+        - "High — Major feature broken"
+        - "Medium — Feature partially broken"
+        - "Low — Minor visual or UX issue"
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: "🖥️ Environment"
+      description: Provide details about your environment.
+      placeholder: |
+        - OS: [e.g. Ubuntu 22.04, macOS 14, Windows 11]
+        - Node version: [e.g. 20.x]
+        - Browser: [e.g. Chrome 122, Firefox 123]
+        - App version / commit: [e.g. v1.2.0 or abc1234]
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: "✔️ Pre-submission Checklist"
+      options:
+        - label: "I have searched for existing issues and this is not a duplicate."
+          required: true
+        - label: "I have provided all the information requested in this form."
+          required: true

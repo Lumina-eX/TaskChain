@@ -1,0 +1,102 @@
+name: 🏷️ Issue Triage
+
+on:
+  issues:
+    types:
+      - opened
+
+permissions:
+  issues: write
+
+jobs:
+  triage:
+    name: Auto-triage New Issues
+    runs-on: ubuntu-latest
+
+    steps:
+      # ──────────────────────────────────────────────────────────────
+      # Step 1 – Apply correct label based on issue template type
+      # ──────────────────────────────────────────────────────────────
+      - name: Detect template and apply labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const title = issue.title || '';
+            const body  = issue.body  || '';
+
+            const labelsToAdd = [];
+
+            if (title.startsWith('[Bug]'))   labelsToAdd.push('bug');
+            if (title.startsWith('[Feature]')) labelsToAdd.push('enhancement');
+            if (title.startsWith('[Docs]'))  labelsToAdd.push('documentation');
+
+            // Always add needs-triage on first open
+            labelsToAdd.push('needs-triage');
+
+            if (labelsToAdd.length > 0) {
+              await github.rest.issues.addLabels({
+                owner:       context.repo.owner,
+                repo:        context.repo.repo,
+                issue_number: issue.number,
+                labels:      [...new Set(labelsToAdd)],
+              });
+              core.info(`Applied labels: ${labelsToAdd.join(', ')}`);
+            }
+
+      # ──────────────────────────────────────────────────────────────
+      # Step 2 – Assign the default maintainer
+      # ──────────────────────────────────────────────────────────────
+      - name: Assign maintainer
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.addAssignees({
+              owner:        context.repo.owner,
+              repo:         context.repo.repo,
+              issue_number: context.payload.issue.number,
+              assignees:    ['Olowodarey'],
+            });
+            core.info('Assigned issue to @Olowodarey');
+
+      # ──────────────────────────────────────────────────────────────
+      # Step 3 – Post a welcome & notification comment
+      # ──────────────────────────────────────────────────────────────
+      - name: Post welcome comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const author = issue.user.login;
+            const title  = issue.title || '';
+
+            let templateNote = 'an issue';
+            if (title.startsWith('[Bug]'))     templateNote = 'a **Bug Report**';
+            if (title.startsWith('[Feature]')) templateNote = 'a **Feature Request**';
+            if (title.startsWith('[Docs]'))    templateNote = 'a **Documentation Update**';
+
+            const body = [
+              `👋 Thank you for opening ${templateNote}, @${author}!`,
+              '',
+              'Your issue has been received and is now in the triage queue.',
+              '',
+              '| Detail | Value |',
+              '|--------|-------|',
+              `| 📌 Issue | #${issue.number} |`,
+              `| 🏷️ Labels | \`needs-triage\` applied |`,
+              `| 👤 Assigned to | @Olowodarey |`,
+              '',
+              '> **@Olowodarey** — a new issue has been opened and is awaiting your review.',
+              '',
+              '---',
+              '_Please keep the conversation respectful and on-topic._',
+              '_Our maintainers will respond as soon as possible. 🙏_',
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner:        context.repo.owner,
+              repo:         context.repo.repo,
+              issue_number: issue.number,
+              body,
+            });
+            core.info('Welcome comment posted successfully.');
