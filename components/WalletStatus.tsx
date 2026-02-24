@@ -1,11 +1,12 @@
-"use client"
+"use client";
 import React from "react";
 
 interface WalletStatusProps {
   isConnected: boolean;
   walletAddress?: string;
-  network?: "Testnet" | "Mainnet";
+  network?: string;
   onConnect?: () => void;
+  onDisconnect?: () => void;
 }
 
 const truncateAddress = (address: string) => {
@@ -17,6 +18,7 @@ export const WalletStatus = ({
   walletAddress,
   network,
   onConnect,
+  onDisconnect,
 }: WalletStatusProps) => {
   return (
     <div className="w-80 p-6 rounded-xl shadow-md bg-white border border-gray-200">
@@ -65,6 +67,12 @@ export const WalletStatus = ({
           className="mt-2 w-full px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors"
         >
           Connect Wallet
+        </button>
+      )}
+
+      {isConnected && (
+        <button onClick={onDisconnect} className="mt-3 text-sm text-red-500">
+          Disconnect
         </button>
       )}
     </div>

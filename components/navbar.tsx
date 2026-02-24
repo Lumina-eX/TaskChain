@@ -5,9 +5,12 @@ import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Menu, X } from "lucide-react";
 import { WalletStatus } from "@/components/WalletStatus";
+import { useWallet } from "@/hooks/useWallet";
 
 export function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const { walletAddress, isConnected, connectWallet, disconnectWallet } = useWallet();
 
   const [open, setOpen] = useState(false);
   const popupRef = useRef<HTMLDivElement>(null);
@@ -84,8 +87,11 @@ export function Navbar() {
                 {open && (
                   <div ref={popupRef} className="absolute right-0 mt-2 z-50">
                     <WalletStatus
-                      isConnected={false}
-                      onConnect={() => alert("Connect clicked")}
+                      isConnected={isConnected}
+                      walletAddress={walletAddress ?? undefined}
+                      network="Testnet"
+                      onConnect={connectWallet}
+                      onDisconnect={disconnectWallet}
                     />
                   </div>
                 )}
