@@ -18,22 +18,6 @@ body:
     validations:
       required: true
 
-  - type: textarea
-    id: solution
-    attributes:
-      label: "💡 Proposed Solution"
-      description: Describe the solution you'd like to see implemented.
-      placeholder: "I'd like the application to..."
-    validations:
-      required: true
-
-  - type: textarea
-    id: alternatives
-    attributes:
-      label: "🔄 Alternatives Considered"
-      description: Have you considered any alternative solutions or features?
-      placeholder: "I also considered..."
-
   - type: dropdown
     id: impact
     attributes:
@@ -45,20 +29,3 @@ body:
         - "Low — Nice to have"
     validations:
       required: true
-
-  - type: textarea
-    id: context
-    attributes:
-      label: "📎 Additional Context"
-      description: Add any other context, mockups, or screenshots about the feature request here.
-      placeholder: "You can drag and drop images here..."
-
-  - type: checkboxes
-    id: terms
-    attributes:
-      label: "✔️ Pre-submission Checklist"
-      options:
-        - label: "I have searched for existing issues and this is not a duplicate."
-          required: true
-        - label: "I have clearly described the problem and proposed solution."
-          required: true
