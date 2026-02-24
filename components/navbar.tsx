@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
+import { ThemeToggle } from '@/components/theme-toggle'
 import { Menu, X } from 'lucide-react'
 import { useState } from 'react'
 
@@ -13,7 +14,7 @@ export function Navbar() {
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary via-secondary to-accent" />
+            <div className="h-8 w-8 rounded-lg bg-linear-to-br from-primary via-secondary to-accent" />
             <span className="text-xl font-bold text-foreground">TaskChain</span>
           </div>
 
@@ -33,6 +34,7 @@ export function Navbar() {
           </div>
 
           <div className="hidden md:flex items-center gap-4">
+            <ThemeToggle />
             <Button variant="ghost" asChild>
               <Link href="/login">Login</Link>
             </Button>
@@ -66,6 +68,10 @@ export function Navbar() {
               Testimonials
             </Link>
             <div className="pt-4 space-y-2">
+              <div className="flex items-center justify-between pb-2">
+                <span className="text-sm text-muted-foreground">Theme</span>
+                <ThemeToggle />
+              </div>
               <Button variant="ghost" className="w-full" asChild>
                 <Link href="/login">Login</Link>
               </Button>
