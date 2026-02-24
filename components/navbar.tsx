@@ -2,11 +2,24 @@
 
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
-import { Menu, X } from 'lucide-react'
-import { useState } from 'react'
+import { Menu, X, Wallet } from 'lucide-react'
+import { useState, useEffect } from 'react'
 
 export function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [address, setAddress] = useState<string | null>(null)
+
+  useEffect(() => {
+    const savedAddress = localStorage.getItem('stellar_wallet_address')
+    if (savedAddress) {
+      setAddress(savedAddress)
+    }
+  }, [])
+
+  const formatAddress = (addr: string) => {
+    if (!addr || addr.length <= 10) return addr;
+    return `${addr.substring(0, 5)}...${addr.substring(addr.length - 4)}`
+  }
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border/40 backdrop-blur-xl bg-background/80">
@@ -33,12 +46,23 @@ export function Navbar() {
           </div>
 
           <div className="hidden md:flex items-center gap-4">
-            <Button variant="ghost" asChild>
-              <Link href="/login">Login</Link>
-            </Button>
-            <Button asChild>
-              <Link href="/signup">Get Started</Link>
-            </Button>
+            {address ? (
+              <Button variant="outline" asChild>
+                <Link href="/login">
+                  <Wallet className="w-4 h-4 mr-2" />
+                  {formatAddress(address)}
+                </Link>
+              </Button>
+            ) : (
+              <>
+                <Button variant="ghost" asChild>
+                  <Link href="/login">Login</Link>
+                </Button>
+                <Button asChild>
+                  <Link href="/signup">Get Started</Link>
+                </Button>
+              </>
+            )}
           </div>
 
           <button
@@ -66,12 +90,23 @@ export function Navbar() {
               Testimonials
             </Link>
             <div className="pt-4 space-y-2">
-              <Button variant="ghost" className="w-full" asChild>
-                <Link href="/login">Login</Link>
-              </Button>
-              <Button className="w-full" asChild>
-                <Link href="/signup">Get Started</Link>
-              </Button>
+              {address ? (
+                <Button variant="outline" className="w-full" asChild>
+                  <Link href="/login">
+                    <Wallet className="w-4 h-4 mr-2" />
+                    {formatAddress(address)}
+                  </Link>
+                </Button>
+              ) : (
+                <>
+                  <Button variant="ghost" className="w-full" asChild>
+                    <Link href="/login">Login</Link>
+                  </Button>
+                  <Button className="w-full" asChild>
+                    <Link href="/signup">Get Started</Link>
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </div>
