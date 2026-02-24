@@ -1,12 +1,36 @@
-'use client'
+"use client";
 
-import Link from 'next/link'
-import { Button } from '@/components/ui/button'
-import { Menu, X } from 'lucide-react'
-import { useState } from 'react'
+import Link from "next/link";
+import { useState, useRef, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { Menu, X } from "lucide-react";
+import { WalletStatus } from "@/components/WalletStatus";
+import { useWallet } from "@/hooks/useWallet";
 
 export function Navbar() {
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const { walletAddress, isConnected, connectWallet, disconnectWallet } = useWallet();
+
+  const [open, setOpen] = useState(false);
+  const popupRef = useRef<HTMLDivElement>(null);
+
+  // Close when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (
+        popupRef.current &&
+        !popupRef.current.contains(event.target as Node)
+      ) {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border/40 backdrop-blur-xl bg-background/80">
@@ -18,16 +42,28 @@ export function Navbar() {
           </div>
 
           <div className="hidden md:flex items-center gap-8">
-            <Link href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <Link
+              href="#features"
+              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
               Features
             </Link>
-            <Link href="#how-it-works" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <Link
+              href="#how-it-works"
+              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
               How It Works
             </Link>
-            <Link href="#benefits" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <Link
+              href="#benefits"
+              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
               Benefits
             </Link>
-            <Link href="#testimonials" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <Link
+              href="#testimonials"
+              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
               Testimonials
             </Link>
           </div>
@@ -39,13 +75,39 @@ export function Navbar() {
             <Button asChild>
               <Link href="/signup">Get Started</Link>
             </Button>
+            <div className="hidden md:flex items-center gap-4">
+              <div className="relative">
+                <button
+                  onClick={() => setOpen(!open)}
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg"
+                >
+                  Wallet
+                </button>
+
+                {open && (
+                  <div ref={popupRef} className="absolute right-0 mt-2 z-50">
+                    <WalletStatus
+                      isConnected={isConnected}
+                      walletAddress={walletAddress ?? undefined}
+                      network="Testnet"
+                      onConnect={connectWallet}
+                      onDisconnect={disconnectWallet}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
 
           <button
             className="md:hidden p-2 text-muted-foreground hover:text-foreground"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
           >
-            {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+            {mobileMenuOpen ? (
+              <X className="h-6 w-6" />
+            ) : (
+              <Menu className="h-6 w-6" />
+            )}
           </button>
         </div>
       </div>
@@ -53,16 +115,28 @@ export function Navbar() {
       {mobileMenuOpen && (
         <div className="md:hidden border-t border-border/40 bg-background/95 backdrop-blur-xl">
           <div className="px-4 py-6 space-y-4">
-            <Link href="#features" className="block text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <Link
+              href="#features"
+              className="block text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
               Features
             </Link>
-            <Link href="#how-it-works" className="block text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <Link
+              href="#how-it-works"
+              className="block text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
               How It Works
             </Link>
-            <Link href="#benefits" className="block text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <Link
+              href="#benefits"
+              className="block text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
               Benefits
             </Link>
-            <Link href="#testimonials" className="block text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <Link
+              href="#testimonials"
+              className="block text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
               Testimonials
             </Link>
             <div className="pt-4 space-y-2">
@@ -77,5 +151,5 @@ export function Navbar() {
         </div>
       )}
     </nav>
-  )
+  );
 }
