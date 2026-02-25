@@ -1,0 +1,31 @@
+name: ✨ Feature Request
+description: Suggest an idea or enhancement for TaskChain.
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for proposing a new feature! Please fill out the form below with as much detail as possible.
+        > 💡 Before submitting, please check [existing issues](../issues) to see if this has already been requested.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: "🔍 Problem Statement"
+      description: Is your feature request related to a problem? If so, describe it clearly.
+      placeholder: "I'm always frustrated when..."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: "📈 Expected Impact"
+      description: How much value would this feature add?
+      options:
+        - "High — Would significantly improve user experience"
+        - "Medium — Would improve a common workflow"
+        - "Low — Nice to have"
+    validations:
+      required: true

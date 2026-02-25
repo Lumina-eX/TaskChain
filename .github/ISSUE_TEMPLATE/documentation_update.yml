@@ -1,0 +1,65 @@
+name: 📝 Documentation Update
+description: Report missing, incorrect, or outdated documentation.
+title: "[Docs]: "
+labels: ["documentation", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping us improve our documentation! Please fill this form out completely.
+
+  - type: dropdown
+    id: doc_area
+    attributes:
+      label: "📂 Documentation Area"
+      description: Which part of the documentation needs updating?
+      options:
+        - "README"
+        - "API Reference"
+        - "Getting Started / Setup Guide"
+        - "Contributing Guidelines"
+        - "Code Comments / JSDoc"
+        - "Other"
+    validations:
+      required: true
+
+  - type: textarea
+    id: current_state
+    attributes:
+      label: "📄 Current State"
+      description: Describe what the current documentation says (or what is missing).
+      placeholder: "The README currently states that..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_change
+    attributes:
+      label: "✏️ Proposed Changes"
+      description: Describe what the documentation should say or what needs to be added.
+      placeholder: "It should instead explain that..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: location
+    attributes:
+      label: "🔗 Location / File Reference"
+      description: If applicable, provide a link to the specific file or section that needs updating.
+      placeholder: "e.g., README.md#installation or https://github.com/..."
+
+  - type: textarea
+    id: context
+    attributes:
+      label: "📎 Additional Context"
+      description: Any other information that would help us improve the documentation.
+
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: "✔️ Pre-submission Checklist"
+      options:
+        - label: "I have searched for existing issues and this is not a duplicate."
+          required: true
+        - label: "I have clearly described what needs to be changed and why."
+          required: true
