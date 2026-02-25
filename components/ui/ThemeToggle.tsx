@@ -10,6 +10,7 @@ export function ThemeToggle() {
     const saved = localStorage.getItem("theme");
     if (saved === "dark") {
       document.documentElement.classList.add("dark");
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDark(true);
     }
   }, []);

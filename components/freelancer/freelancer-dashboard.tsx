@@ -9,6 +9,9 @@ import {
   type EscrowEntry,
   type FreelancerDashboardData,
 } from '@/lib/freelancer-dashboard'
+import { MilestoneModal } from '@/components/milestone-modal'
+import { Plus } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -153,11 +156,21 @@ export function FreelancerDashboard() {
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-      <header className="mb-8">
-        <h1 className="text-3xl font-semibold text-foreground">Freelancer Dashboard</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Last updated: {formatDate(data.updatedAt)}. Data refreshes every 30 seconds.
-        </p>
+      <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-semibold text-foreground">Freelancer Dashboard</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Last updated: {formatDate(data.updatedAt)}. Data refreshes every 30 seconds.
+          </p>
+        </div>
+        <MilestoneModal 
+          trigger={
+            <Button className="bg-primary text-primary-foreground hover:bg-primary/90">
+              <Plus className="mr-2 h-4 w-4" />
+              New Milestone
+            </Button>
+          }
+        />
       </header>
 
       <section className="mb-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
