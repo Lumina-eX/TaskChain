@@ -1,0 +1,30 @@
+name: CI Enhancement
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' # Use the project's current version
+          cache: 'npm'       # Technical Note: Configure caching for speed
+
+      - name: Install Dependencies
+        run: npm ci          # Technical Note: Cleaner/faster than 'npm install'
+
+      - name: Run Lint
+        run: npm run lint
+
+      - name: Build Project
+        run: npm run build   # The core requirement of this feature
