@@ -4,6 +4,8 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Menu, X, Wallet } from 'lucide-react'
 import { useState, useEffect } from 'react'
+import Image from 'next/image'
+import { ThemeToggle } from './ui/ThemeToggle'
 
 export function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -26,7 +28,13 @@ export function Navbar() {
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary via-secondary to-accent" />
+            <Image
+              src='/assets/logo2.png'
+              alt="Logo"
+              width={20}
+              height={20}
+              className="h-10 w-10 object-cover"
+            />
             <span className="text-xl font-bold text-foreground">TaskChain</span>
           </div>
 
@@ -61,8 +69,11 @@ export function Navbar() {
                 <Button asChild>
                   <Link href="/signup">Get Started</Link>
                 </Button>
+                   <ThemeToggle />
               </>
             )}
+          
+         
           </div>
 
           <button
