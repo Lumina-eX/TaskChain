@@ -146,6 +146,19 @@ Please ensure your code follows the existing style and includes proper documenta
 
 ---
 
+## 🧪 CI/CD Status
+
+GitHub Actions workflows have been **intentionally removed** from this repository due to instability in the previous CI setup. New commits and pull requests **will not trigger GitHub Actions checks** until a new CI/CD solution is introduced.
+
+- For now, please run **local checks** before opening a PR:
+  - `npm run lint`
+  - `npm run build`
+- Repository administrators should ensure that **no GitHub Actions checks are configured as required** in the repository’s branch protection rules to avoid blocking merges.
+
+Future work may introduce an alternative CI/CD pipeline (e.g., a different provider or a simplified Actions setup) once a stable configuration is defined.
+
+---
+
 ## 📄 License
 
 This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.

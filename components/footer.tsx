@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { Github, Twitter, Linkedin } from 'lucide-react'
+import Image from 'next/image'
 
 export function Footer() {
   return (
@@ -8,14 +9,20 @@ export function Footer() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-8">
           <div className="col-span-2 md:col-span-1">
             <div className="flex items-center gap-2 mb-4">
-              <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary via-secondary to-accent" />
+              <Image
+                src='/assets/logo2.png'
+                alt="Logo"
+                width={20}
+                height={20}
+                className="h-10 w-10 object-cover"
+              />
               <span className="text-xl font-bold">TaskChain</span>
             </div>
             <p className="text-sm text-muted-foreground leading-relaxed">
               Secure freelance platform powered by Stellar blockchain escrow.
             </p>
           </div>
-          
+
           <div>
             <h3 className="font-semibold mb-4">Platform</h3>
             <ul className="space-y-2 text-sm text-muted-foreground">
@@ -41,7 +48,7 @@ export function Footer() {
               </li>
             </ul>
           </div>
-          
+
           <div>
             <h3 className="font-semibold mb-4">Resources</h3>
             <ul className="space-y-2 text-sm text-muted-foreground">
@@ -67,7 +74,7 @@ export function Footer() {
               </li>
             </ul>
           </div>
-          
+
           <div>
             <h3 className="font-semibold mb-4">Legal</h3>
             <ul className="space-y-2 text-sm text-muted-foreground">
@@ -89,12 +96,12 @@ export function Footer() {
             </ul>
           </div>
         </div>
-        
+
         <div className="flex flex-col md:flex-row items-center justify-between pt-8 border-t border-border/40 gap-4">
           <p className="text-sm text-muted-foreground">
             © 2024 TaskChain. All rights reserved.
           </p>
-          
+
           <div className="flex items-center gap-4">
             <Link
               href="https://twitter.com"
