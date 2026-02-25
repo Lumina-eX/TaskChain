@@ -11,7 +11,7 @@ export function Benefits() {
             Built for Everyone
           </h2>
           <p className="mx-auto max-w-2xl text-lg text-muted-foreground text-balance">
-            Whether you're hiring or looking for work, TaskChain has you covered.
+            Whether you&apos;re hiring or looking for work, TaskChain has you covered.
           </p>
         </div>
         

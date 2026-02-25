@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Menu, X } from 'lucide-react'
 import { useState } from 'react'
 import Image from 'next/image'
+import { ThemeToggle } from './ui/ThemeToggle'
 
 export function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -46,6 +47,7 @@ export function Navbar() {
             <Button asChild>
               <Link href="/signup">Get Started</Link>
             </Button>
+            <ThemeToggle />
           </div>
 
           <button
