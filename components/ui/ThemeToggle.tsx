@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Sun, Moon } from "lucide-react";
 
 export function ThemeToggle() {
-  // 1. Initialize state with a function so it only runs once on mount
+  // 1. Initialize state properly to avoid cascading renders
   const [dark, setDark] = useState(() => {
     if (typeof window !== "undefined") {
       return localStorage.getItem("theme") === "dark";
@@ -12,7 +12,7 @@ export function ThemeToggle() {
     return false;
   });
 
-  // 2. This effect now only handles the DOM class, not state updates
+  // 2. Synchronize the HTML class with the state
   useEffect(() => {
     if (dark) {
       document.documentElement.classList.add("dark");
@@ -27,25 +27,6 @@ export function ThemeToggle() {
       localStorage.setItem("theme", newDark ? "dark" : "light");
       return newDark;
     });
-  const [dark, setDark] = useState(false);
-
-  useEffect(() => {
-    const saved = localStorage.getItem("theme");
-    if (saved === "dark") {
-      document.documentElement.classList.add("dark");
-      setDark(true);
-    }
-  }, []);
-
-  const toggleTheme = () => {
-    if (dark) {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
-    } else {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-    }
-    setDark(!dark);
   };
 
   return (
@@ -56,5 +37,4 @@ export function ThemeToggle() {
       {dark ? <Sun size={18} /> : <Moon size={18} />}
     </button>
   );
-}
 }
