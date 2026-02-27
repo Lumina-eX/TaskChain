@@ -16,6 +16,8 @@ export function ThemeToggle() {
   useEffect(() => {
     if (dark) {
       document.documentElement.classList.add("dark");
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setDark(true);
     } else {
       document.documentElement.classList.remove("dark");
     }
