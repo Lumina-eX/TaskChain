@@ -88,7 +88,10 @@ async function processPaymentEvent(record: any) {
        
        await sql`
          UPDATE jobs 
-         SET escrow_status = 'released', status = 'completed', updated_at = CURRENT_TIMESTAMP
+         SET escrow_status = 'released',
+             status = 'completed',
+             completed_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
          WHERE id = ${jobId} AND escrow_status != 'released'
        `
  
