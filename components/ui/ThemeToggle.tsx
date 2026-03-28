@@ -1,42 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Sun, Moon } from "lucide-react";
+import { Moon, Sun } from "lucide-react";
+import { useTheme } from "next-themes";
 
 export function ThemeToggle() {
-  // 1. Initialize state properly to avoid cascading renders
-  const [dark, setDark] = useState(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("theme") === "dark";
-    }
-    return false;
-  });
-
-  // 2. Synchronize the HTML class with the state
-  useEffect(() => {
-    if (dark) {
-      document.documentElement.classList.add("dark");
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setDark(true);
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
-  }, [dark]);
-
-  const toggleTheme = () => {
-    setDark((prev) => {
-      const newDark = !prev;
-      localStorage.setItem("theme", newDark ? "dark" : "light");
-      return newDark;
-    });
-  };
+  const { theme, setTheme } = useTheme();
 
   return (
     <button
-      onClick={toggleTheme}
+      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
       className="p-2 rounded-lg bg-muted hover:bg-muted/80 transition"
     >
-      {dark ? <Sun size={18} /> : <Moon size={18} />}
+      {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
     </button>
   );
 }
