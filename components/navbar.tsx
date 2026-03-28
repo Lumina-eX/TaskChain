@@ -6,6 +6,7 @@ import { Menu, X, Wallet } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import Image from 'next/image'
 import { ThemeToggle } from './ui/ThemeToggle'
+import { NotificationBell } from './notifications/notification-bell'
 
 export function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -69,7 +70,8 @@ export function Navbar() {
                 <Button asChild>
                   <Link href="/signup">Get Started</Link>
                 </Button>
-                   <ThemeToggle />
+                <ThemeToggle />
+                <NotificationBell />
               </>
             )}
           
@@ -116,6 +118,9 @@ export function Navbar() {
                   <Button className="w-full" asChild>
                     <Link href="/signup">Get Started</Link>
                   </Button>
+                  <div className="flex justify-center pt-2">
+                    <NotificationBell />
+                  </div>
                 </>
               )}
             </div>
