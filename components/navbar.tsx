@@ -13,10 +13,11 @@ export function Navbar() {
 
   useEffect(() => {
     const savedAddress = localStorage.getItem('stellar_wallet_address')
-    if (savedAddress) {
+    if (savedAddress && savedAddress !== address) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setAddress(savedAddress)
     }
-  }, [])
+  }, [address])
 
   const formatAddress = (addr: string) => {
     if (!addr || addr.length <= 10) return addr;
