@@ -166,7 +166,7 @@ export default function LoginPage() {
               </Button>
 
               <p className="text-xs text-muted-foreground pt-4 border-t border-border/40">
-                By connecting a wallet, you agree to TaskChain's Terms of Service and Privacy Policy.
+                By connecting a wallet, you agree to TaskChain&apos;s Terms of Service and Privacy Policy.
               </p>
             </div>
           )}
