@@ -112,7 +112,7 @@ export default function LoginPage() {
           </div>
 
           <div className="space-y-2">
-            <h1 className="text-2xl font-bold tracking-tight text-card-foreground">Connect Wallet</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-primary">Connect Wallet</h1>
             <p className="text-sm text-muted-foreground">
               Connect your Stellar Freighter wallet to access your account securely.
             </p>

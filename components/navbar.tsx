@@ -57,7 +57,7 @@ export function Navbar() {
           <div className="hidden md:flex items-center gap-4">
             {address ? (
               <Button variant="outline" asChild>
-                <Link href="/login">
+                <Link href="/dashboard">
                   <Wallet className="w-4 h-4 mr-2" />
                   {formatAddress(address)}
                 </Link>
@@ -104,7 +104,7 @@ export function Navbar() {
             <div className="pt-4 space-y-2">
               {address ? (
                 <Button variant="outline" className="w-full" asChild>
-                  <Link href="/login">
+                  <Link href="/dashboard">
                     <Wallet className="w-4 h-4 mr-2" />
                     {formatAddress(address)}
                   </Link>
