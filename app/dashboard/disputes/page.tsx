@@ -17,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { DisputeDetailsDialog } from "@/components/dashboard/dispute-details-dialog";
 
 interface Dispute {
   id: string;
@@ -222,6 +223,11 @@ export default function DisputesPage() {
 
       {/* Dialogs */}
       <DisputeForm open={showDisputeForm} onOpenChange={setShowDisputeForm} />
+      <DisputeDetailsDialog
+  dispute={selectedDispute}
+  open={!!selectedDispute}
+  onOpenChange={() => setSelectedDispute(null)}
+/>
     </div>
   );
 }
