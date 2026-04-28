@@ -3,11 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "build": "next build",
     "dev": "next dev",
-    "lint": "eslint .",
+    "build": "next build",
     "start": "next start",
-    "worker": "tsx scripts/worker.ts"
+    "lint": "eslint .",
+    "worker": "tsx scripts/worker.ts",
+    "migrate": "tsx scripts/migrate.ts",
+    "build:production": "npm run migrate && next build",
+    "start:production": "next start"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -71,13 +74,15 @@
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "baseline-browser-mapping": "^2.10.0",
+    "@types/ws": "^8",
+    "baseline-browser-mapping": "^2.10.23",
     "eslint": "^9.39.3",
     "eslint-config-next": "^16.1.6",
     "postcss": "^8.5",
     "tailwindcss": "^4.1.9",
     "tsx": "^4.21.0",
     "tw-animate-css": "1.3.3",
-    "typescript": "^5"
+    "typescript": "^5",
+    "ws": "^8.18.0"
   }
 }

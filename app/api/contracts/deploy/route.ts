@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { NextRequest, NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/middleware'
 import { deploySorobanEscrow, SorobanDeployError } from '@/lib/soroban/deploy'
@@ -60,7 +62,6 @@ export const POST = withAuth(async (request: NextRequest, auth) => {
     )
   }
 
-  // --- Input validation ---
   if (!isPositiveInt(body.jobId)) {
     return NextResponse.json(
       { error: 'jobId must be a positive integer', code: 'INVALID_JOB_ID' },
@@ -79,6 +80,7 @@ export const POST = withAuth(async (request: NextRequest, auth) => {
       { status: 400 }
     )
   }
+
   const currency = isNonEmptyString(body.currency) ? body.currency.toUpperCase() : 'XLM'
   const terms = isNonEmptyString(body.terms) ? body.terms : undefined
 
@@ -91,7 +93,6 @@ export const POST = withAuth(async (request: NextRequest, auth) => {
     milestones = parsed
   }
 
-  // --- Resolve authenticated user to a DB user id ---
   const clientDbId = await getUserIdByWalletAddress(auth.walletAddress)
   if (clientDbId === null) {
     return NextResponse.json(
@@ -100,19 +101,12 @@ export const POST = withAuth(async (request: NextRequest, auth) => {
     )
   }
 
-  // --- Verify job exists and belongs to the authenticated client ---
   const job = await getJobById(body.jobId)
   if (job === null) {
-    return NextResponse.json(
-      { error: 'Job not found', code: 'JOB_NOT_FOUND' },
-      { status: 404 }
-    )
+    return NextResponse.json({ error: 'Job not found', code: 'JOB_NOT_FOUND' }, { status: 404 })
   }
   if (job.client_id !== clientDbId) {
-    return NextResponse.json(
-      { error: 'You are not the client for this job', code: 'FORBIDDEN' },
-      { status: 403 }
-    )
+    return NextResponse.json({ error: 'You are not the client for this job', code: 'FORBIDDEN' }, { status: 403 })
   }
   if (job.status === 'completed' || job.status === 'cancelled') {
     return NextResponse.json(
@@ -121,30 +115,19 @@ export const POST = withAuth(async (request: NextRequest, auth) => {
     )
   }
 
-  // --- Ensure no contract has already been deployed for this job ---
   const existing = await getExistingContract(body.jobId)
   if (existing !== null) {
     return NextResponse.json(
-      {
-        error: 'A contract already exists for this job',
-        code: 'CONTRACT_ALREADY_EXISTS',
-        contractId: existing.id,
-        contractAddress: existing.contract_address,
-      },
+      { error: 'A contract already exists for this job', code: 'CONTRACT_ALREADY_EXISTS', contractId: existing.id, contractAddress: existing.contract_address },
       { status: 409 }
     )
   }
 
-  // --- Verify freelancer exists ---
   const freelancer = await getUserById(body.freelancerId)
   if (freelancer === null) {
-    return NextResponse.json(
-      { error: 'Freelancer not found', code: 'FREELANCER_NOT_FOUND' },
-      { status: 404 }
-    )
+    return NextResponse.json({ error: 'Freelancer not found', code: 'FREELANCER_NOT_FOUND' }, { status: 404 })
   }
 
-  // --- Deploy Soroban contract ---
   let deployment
   try {
     deployment = await deploySorobanEscrow({
@@ -154,16 +137,11 @@ export const POST = withAuth(async (request: NextRequest, auth) => {
       currency,
     })
   } catch (err) {
-    const message =
-      err instanceof SorobanDeployError ? err.message : 'Contract deployment failed'
+    const message = err instanceof SorobanDeployError ? err.message : 'Contract deployment failed'
     console.error('[contracts/deploy] Soroban deployment error:', err)
-    return NextResponse.json(
-      { error: message, code: 'DEPLOYMENT_FAILED' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: message, code: 'DEPLOYMENT_FAILED' }, { status: 500 })
   }
 
-  // --- Persist to database ---
   let contract
   try {
     contract = await createContract({
@@ -177,18 +155,13 @@ export const POST = withAuth(async (request: NextRequest, auth) => {
       txHash: deployment.txHash,
       networkPassphrase: deployment.networkPassphrase,
     })
-
     await linkJobToContract(body.jobId, deployment.contractAddress)
-
     if (milestones.length > 0) {
       await createMilestones(body.jobId, contract.id, milestones)
     }
   } catch (err) {
     console.error('[contracts/deploy] DB persistence error:', err)
-    return NextResponse.json(
-      { error: 'Failed to persist contract data', code: 'DB_ERROR' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Failed to persist contract data', code: 'DB_ERROR' }, { status: 500 })
   }
 
   return NextResponse.json(

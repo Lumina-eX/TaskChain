@@ -1,10 +1,9 @@
+export const dynamic = 'force-dynamic'
+
 import { NextRequest, NextResponse } from 'next/server'
 import { withAuth } from '@/lib/auth/middleware'
 import { enforceRateLimit, buildRateLimitKey } from '@/lib/security/rateLimit'
-import {
-  getFreelancerReputation,
-  getUserIdByWallet,
-} from '@/lib/reputation'
+import { getFreelancerReputation, getUserIdByWallet } from '@/lib/reputation'
 
 export const GET = withAuth(async (request: NextRequest, auth) => {
   const limited = await enforceRateLimit(request, {
@@ -30,9 +29,7 @@ export const GET = withAuth(async (request: NextRequest, auth) => {
     const payload = await getFreelancerReputation(userId, { forceRefresh })
     return NextResponse.json(payload, {
       status: 200,
-      headers: {
-        'Cache-Control': 'private, no-store',
-      },
+      headers: { 'Cache-Control': 'private, no-store' },
     })
   } catch {
     return NextResponse.json(

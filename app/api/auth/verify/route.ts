@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { NextRequest, NextResponse } from 'next/server'
 import { createSession, setSessionCookies } from '@/lib/auth/session'
 import { consumeNonce, hasActiveNonce } from '@/lib/auth/store'
@@ -25,61 +27,35 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if ('response' in parsed) return parsed.response
     const body = parsed.data
 
-    const walletAddress = body.walletAddress
-    const nonce = body.nonce
-    const signature = body.signature
-
     const limited = await enforceRateLimit(request, {
-      key: buildRateLimitKey(request, 'auth:verify', walletAddress),
+      key: buildRateLimitKey(request, 'auth:verify', body.walletAddress),
       limit: 10,
       windowMs: 60_000,
     })
     if (limited) return limited
 
-    if (!walletAddress || !nonce || !signature) {
+    if (!isValidStellarAddress(body.walletAddress)) {
       return NextResponse.json(
-        {
-          error: 'Missing walletAddress, nonce, or signature',
-          code: 'INVALID_AUTH_PAYLOAD',
-        },
+        { error: 'Invalid wallet address', code: 'INVALID_WALLET_ADDRESS' },
         { status: 400 }
       )
     }
 
-    if (!isValidStellarAddress(walletAddress)) {
-      return NextResponse.json(
-        {
-          error: 'Invalid wallet address',
-          code: 'INVALID_WALLET_ADDRESS',
-        },
-        { status: 400 }
-      )
-    }
-
-    const normalizedWallet = normalizeWalletAddress(walletAddress)
-    const nonceHash = sha256Hex(nonce)
-    const expectedMessage = buildAuthMessage(normalizedWallet, nonce)
+    const normalizedWallet = normalizeWalletAddress(body.walletAddress)
+    const nonceHash = sha256Hex(body.nonce)
+    const expectedMessage = buildAuthMessage(normalizedWallet, body.nonce)
 
     if (body.message && body.message !== expectedMessage) {
       return NextResponse.json(
-        {
-          error: 'Signed message does not match expected format',
-          code: 'MESSAGE_MISMATCH',
-        },
+        { error: 'Signed message does not match expected format', code: 'MESSAGE_MISMATCH' },
         { status: 400 }
       )
     }
 
-    const nonceIsValid = await hasActiveNonce({
-      walletAddress: normalizedWallet,
-      nonceHash,
-    })
+    const nonceIsValid = await hasActiveNonce({ walletAddress: normalizedWallet, nonceHash })
     if (!nonceIsValid) {
       return NextResponse.json(
-        {
-          error: 'Nonce is invalid, expired, or already used',
-          code: 'INVALID_NONCE',
-        },
+        { error: 'Nonce is invalid, expired, or already used', code: 'INVALID_NONCE' },
         { status: 401 }
       )
     }
@@ -87,28 +63,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const signatureIsValid = verifyStellarSignature({
       walletAddress: normalizedWallet,
       message: expectedMessage,
-      signature,
+      signature: body.signature,
     })
     if (!signatureIsValid) {
       return NextResponse.json(
-        {
-          error: 'Invalid wallet signature',
-          code: 'INVALID_SIGNATURE',
-        },
+        { error: 'Invalid wallet signature', code: 'INVALID_SIGNATURE' },
         { status: 401 }
       )
     }
 
-    const consumed = await consumeNonce({
-      walletAddress: normalizedWallet,
-      nonceHash,
-    })
+    const consumed = await consumeNonce({ walletAddress: normalizedWallet, nonceHash })
     if (!consumed) {
       return NextResponse.json(
-        {
-          error: 'Nonce is invalid, expired, or already used',
-          code: 'INVALID_NONCE',
-        },
+        { error: 'Nonce is invalid, expired, or already used', code: 'INVALID_NONCE' },
         { status: 401 }
       )
     }
@@ -123,14 +90,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       { status: 200 }
     )
     setSessionCookies(response, session)
-
     return response
   } catch {
     return NextResponse.json(
-      {
-        error: 'Authentication failed',
-        code: 'AUTH_VERIFICATION_FAILED',
-      },
+      { error: 'Authentication failed', code: 'AUTH_VERIFICATION_FAILED' },
       { status: 500 }
     )
   }

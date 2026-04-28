@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { NextRequest, NextResponse } from 'next/server'
 import {
   clearSessionCookies,
@@ -25,10 +27,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return response
   } catch {
     return NextResponse.json(
-      {
-        error: 'Failed to log out',
-        code: 'LOGOUT_FAILED',
-      },
+      { error: 'Failed to log out', code: 'LOGOUT_FAILED' },
       { status: 500 }
     )
   }

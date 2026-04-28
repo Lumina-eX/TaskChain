@@ -1,15 +1,20 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { isConnected, requestAccess, getAddress } from '@stellar/freighter-api'
 import { Button } from '@/components/ui/button'
-import { Wallet, LogOut, AlertCircle, Loader2, ArrowLeft } from 'lucide-react'
+import { Wallet, LogOut, AlertCircle, Loader2, ArrowLeft, FlaskConical } from 'lucide-react'
 import Link from 'next/link'
 
+const IS_DEV = process.env.NODE_ENV !== 'production'
+
 export default function LoginPage() {
+  const router = useRouter()
   const [address, setAddress] = useState<string | null>(null)
   const [isInitializing, setIsInitializing] = useState(true)
   const [isConnecting, setIsConnecting] = useState(false)
+  const [isMocking, setIsMocking] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Initialize session from local storage on mount
@@ -75,6 +80,28 @@ export default function LoginPage() {
       setError(err?.message || 'Unable to connect wallet. Please try again.')
     } finally {
       setIsConnecting(false)
+    }
+  }
+
+  const handleMockLogin = async () => {
+    setError(null)
+    setIsMocking(true)
+    try {
+      const res = await fetch('/api/auth/mock', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data?.error ?? 'Mock auth failed')
+      setAddress(data.walletAddress)
+      localStorage.setItem('stellar_wallet_address', data.walletAddress)
+      // Store the access token so the wizard can send it as a Bearer header
+      // in case the httpOnly cookie isn't forwarded by the browser in dev.
+      if (data.accessToken) {
+        localStorage.setItem('tc_dev_access_token', data.accessToken)
+      }
+      router.push('/dashboard')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Mock login failed')
+    } finally {
+      setIsMocking(false)
     }
   }
 
@@ -164,6 +191,40 @@ export default function LoginPage() {
                   'Connect Freighter'
                 )}
               </Button>
+
+              {/* Dev-only bypass — never rendered in production */}
+              {IS_DEV && (
+                <div className="space-y-2">
+                  <div className="relative flex items-center gap-2">
+                    <div className="flex-1 h-px bg-border/40" />
+                    <span className="text-[10px] font-mono text-muted-foreground/60 uppercase tracking-widest">
+                      dev only
+                    </span>
+                    <div className="flex-1 h-px bg-border/40" />
+                  </div>
+                  <Button
+                    variant="outline"
+                    className="w-full border-dashed border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 hover:border-amber-500/60"
+                    onClick={handleMockLogin}
+                    disabled={isMocking}
+                  >
+                    {isMocking ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Bypassing…
+                      </>
+                    ) : (
+                      <>
+                        <FlaskConical className="w-4 h-4 mr-2" />
+                        Bypass — Dev Mode
+                      </>
+                    )}
+                  </Button>
+                  <p className="text-[10px] text-center text-muted-foreground/50">
+                    Skips wallet. Uses mock address for DB testing.
+                  </p>
+                </div>
+              )}
 
               <p className="text-xs text-muted-foreground pt-4 border-t border-border/40">
                 By connecting a wallet, you agree to TaskChain&apos;s Terms of Service and Privacy Policy.
