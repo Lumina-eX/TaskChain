@@ -24,7 +24,6 @@ import type {
 // Row → domain mappers
 // ---------------------------------------------------------------------------
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToContract(row: any): EscrowContract {
   return {
     id: row.id,
@@ -53,7 +52,6 @@ function rowToContract(row: any): EscrowContract {
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToMilestone(row: any): EscrowMilestone {
   return {
     id: row.id,
@@ -78,7 +76,6 @@ function rowToMilestone(row: any): EscrowMilestone {
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function rowToDispute(row: any): EscrowDispute {
   return {
     id: row.id,

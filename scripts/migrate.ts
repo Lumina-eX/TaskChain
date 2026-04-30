@@ -77,7 +77,6 @@ if (!databaseUrl) {
 
 // ── WebSocket polyfill ────────────────────────────────────────────────────────
 // Pool (WebSocket driver) needs a WS constructor in Node.js.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 neonConfig.webSocketConstructor = require('ws')
 
 const MIGRATIONS_DIR = path.join(PROJECT_ROOT, 'lib', 'db', 'migrations')
