@@ -12,6 +12,88 @@ if (!process.env.DATABASE_URL) {
 const sql = neon(process.env.DATABASE_URL)
 const server = new Server(process.env.STELLAR_HORIZON_URL || 'https://horizon-testnet.stellar.org')
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Fee tracking helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+type FeeOperationType =
+  | 'job_fund' | 'job_release' | 'job_refund'
+  | 'milestone_fund' | 'milestone_release' | 'milestone_refund'
+  | 'dispute_resolution'
+
+/**
+ * Persists actual fee data captured from a Horizon payment record.
+ * fee_charged is in stroops (1 XLM = 10,000,000 stroops).
+ * Non-fatal: logs errors but does not interrupt payment processing.
+ */
+async function recordFee(params: {
+  stellarTxHash: string
+  operationType: FeeOperationType
+  feeCharged: string | number
+  jobId?: number | null
+  milestoneId?: number | null
+  contractId?: number | null
+  ledger?: number | null
+}): Promise<void> {
+  try {
+    const totalFeeStroops = BigInt(params.feeCharged ?? 100)
+    const totalFeeXlm = Number(totalFeeStroops) / 10_000_000
+
+    await sql`
+      INSERT INTO transaction_fees (
+        stellar_tx_hash,
+        operation_type,
+        job_id,
+        milestone_id,
+        contract_id,
+        base_fee_stroops,
+        resource_fee_stroops,
+        total_fee_stroops,
+        total_fee_xlm,
+        ledger_sequence,
+        network_passphrase,
+        optimization_applied,
+        savings_stroops
+      )
+      VALUES (
+        ${params.stellarTxHash},
+        ${params.operationType},
+        ${params.jobId ?? null},
+        ${params.milestoneId ?? null},
+        ${params.contractId ?? null},
+        ${totalFeeStroops.toString()},
+        ${'0'},
+        ${totalFeeStroops.toString()},
+        ${totalFeeXlm},
+        ${params.ledger ?? null},
+        ${process.env.STELLAR_NETWORK_PASSPHRASE ?? 'Test SDF Network ; September 2015'},
+        ${'{}'},
+        ${'0'}
+      )
+      ON CONFLICT (stellar_tx_hash) DO NOTHING
+    `
+    console.log(
+      `[FEE] Recorded ${params.operationType} fee: ${totalFeeStroops} stroops (${totalFeeXlm.toFixed(7)} XLM) for tx ${params.stellarTxHash}`
+    )
+  } catch (err) {
+    console.error(`[WORKER ERROR] Failed to record fee for tx ${params.stellarTxHash}:`, err)
+  }
+}
+
+/**
+ * Looks up the contract_id for a given job_id (for fee attribution).
+ */
+async function getContractIdForJob(jobId: number): Promise<number | null> {
+  try {
+    const rows = await sql`
+      SELECT id FROM contracts WHERE job_id = ${jobId} LIMIT 1
+    `
+    return (rows[0] as { id: number } | undefined)?.id ?? null
+  } catch {
+    return null
+  }
+}
+
 const PLATFORM_ESCROW_ACCOUNT = process.env.ESCROW_ACCOUNT_ID || 'GBD2Z3PZ2L5KHTC4YQZKVH4A4XJ4Q5X6M7N8O9P0Q1R2S3T4U5V6W7X8'
 
 async function createNotification(userId: number, title: string, message: string, type: string = 'info') {
@@ -60,6 +142,9 @@ async function processPayment(record: any) {
     const currency = record.asset_type === 'native' ? 'XLM' : record.asset_code
     const from = record.from
     const to = record.to
+    // Capture fee data from the Horizon record
+    const feeCharged = transaction.fee_charged ?? transaction.fee ?? 100
+    const ledger = transaction.ledger_attr ?? null
 
     // Idempotency check
     const existingTx = await sql`SELECT id FROM escrow_transactions WHERE stellar_transaction_hash = ${txHash}`
@@ -71,18 +156,18 @@ async function processPayment(record: any) {
     if (memo.startsWith('JOB-')) {
       const jobId = parseInt(memo.replace('JOB-', ''), 10)
       if (isNaN(jobId)) return
-      await handleJobPayment(jobId, record, txHash, amount, currency, from, to)
+      await handleJobPayment(jobId, record, txHash, amount, currency, from, to, feeCharged, ledger)
     } else if (memo.startsWith('MIL-')) {
       const milestoneId = parseInt(memo.replace('MIL-', ''), 10)
       if (isNaN(milestoneId)) return
-      await handleMilestonePayment(milestoneId, record, txHash, amount, currency, from, to)
+      await handleMilestonePayment(milestoneId, record, txHash, amount, currency, from, to, feeCharged, ledger)
     }
   } catch (error) {
     console.error(`[WORKER ERROR] Failed to process payment record ${record.id}:`, error)
   }
 }
 
-async function handleJobPayment(jobId: number, record: any, txHash: string, amount: string, currency: string, from: string, to: string) {
+async function handleJobPayment(jobId: number, record: any, txHash: string, amount: string, currency: string, from: string, to: string, feeCharged: string | number = 100, ledger: number | null = null) {
   const job = await getJobById(jobId)
   if (!job) {
     console.warn(`[WORKER] Job #${jobId} not found for transaction ${txHash}`)
@@ -105,6 +190,10 @@ async function handleJobPayment(jobId: number, record: any, txHash: string, amou
       WHERE id = ${jobId}
     `
 
+    // Record fee for analytics
+    const contractId = await getContractIdForJob(jobId)
+    await recordFee({ stellarTxHash: txHash, operationType: 'job_fund', feeCharged, jobId, contractId, ledger })
+
     await createNotification(job.client_id, 'Escrow Funded', `You have successfully funded Job #${jobId} with ${amount} ${currency}.`, 'success')
     if (job.freelancer_id) {
       await createNotification(job.freelancer_id, 'Project Started', `Funding for Job #${jobId} is confirmed. You can now start working!`, 'info')
@@ -113,6 +202,7 @@ async function handleJobPayment(jobId: number, record: any, txHash: string, amou
     const isRefund = to === job.client_wallet
     const isRelease = to === job.freelancer_wallet
     const type = isRefund ? 'refund' : (isRelease ? 'release' : 'dispute_resolution')
+    const feeOpType: FeeOperationType = isRefund ? 'job_refund' : (isRelease ? 'job_release' : 'dispute_resolution')
 
     console.log(`[WORKER] Detected JOB ${type.toUpperCase()} of ${amount} ${currency} for Job #${jobId}`)
 
@@ -120,6 +210,10 @@ async function handleJobPayment(jobId: number, record: any, txHash: string, amou
       INSERT INTO escrow_transactions (job_id, stellar_transaction_hash, amount, currency, transaction_type, from_wallet, to_wallet, status)
       VALUES (${jobId}, ${txHash}, ${amount}, ${currency}, ${type}, ${from}, ${to}, 'confirmed')
     `
+
+    // Record fee for analytics
+    const contractId = await getContractIdForJob(jobId)
+    await recordFee({ stellarTxHash: txHash, operationType: feeOpType, feeCharged, jobId, contractId, ledger })
 
     if (isRelease) {
       await sql`
@@ -143,7 +237,7 @@ async function handleJobPayment(jobId: number, record: any, txHash: string, amou
   }
 }
 
-async function handleMilestonePayment(milestoneId: number, record: any, txHash: string, amount: string, currency: string, from: string, to: string) {
+async function handleMilestonePayment(milestoneId: number, record: any, txHash: string, amount: string, currency: string, from: string, to: string, feeCharged: string | number = 100, ledger: number | null = null) {
   const milestone = await getMilestoneById(milestoneId)
   if (!milestone) {
     console.warn(`[WORKER] Milestone #${milestoneId} not found for transaction ${txHash}`)
@@ -166,11 +260,16 @@ async function handleMilestonePayment(milestoneId: number, record: any, txHash: 
       WHERE id = ${milestoneId}
     `
 
+    // Record fee for analytics
+    const contractId = await getContractIdForJob(milestone.job_id)
+    await recordFee({ stellarTxHash: txHash, operationType: 'milestone_fund', feeCharged, jobId: milestone.job_id, milestoneId, contractId, ledger })
+
     await createNotification(milestone.client_id, 'Milestone Funded', `Milestone "${milestone.title}" funded with ${amount} ${currency}.`, 'success')
   } else if (isFromEscrow) {
     const isRefund = to === milestone.client_wallet
     const isRelease = to === milestone.freelancer_wallet
     const type = isRefund ? 'refund' : (isRelease ? 'release' : 'dispute_resolution')
+    const feeOpType: FeeOperationType = isRefund ? 'milestone_refund' : (isRelease ? 'milestone_release' : 'dispute_resolution')
 
     console.log(`[WORKER] Detected MILESTONE ${type.toUpperCase()} of ${amount} ${currency} for Milestone #${milestoneId}`)
 
@@ -178,6 +277,10 @@ async function handleMilestonePayment(milestoneId: number, record: any, txHash: 
       INSERT INTO escrow_transactions (job_id, stellar_transaction_hash, amount, currency, transaction_type, from_wallet, to_wallet, status)
       VALUES (${milestone.job_id}, ${txHash}, ${amount}, ${currency}, ${type}, ${from}, ${to}, 'confirmed')
     `
+
+    // Record fee for analytics
+    const contractId = await getContractIdForJob(milestone.job_id)
+    await recordFee({ stellarTxHash: txHash, operationType: feeOpType, feeCharged, jobId: milestone.job_id, milestoneId, contractId, ledger })
 
     if (isRelease) {
       await sql`
