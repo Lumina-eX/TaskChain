@@ -7,23 +7,21 @@ export function ThemeToggle() {
   const [dark, setDark] = useState(false);
   const [mounted, setMounted] = useState(false);
 
-  // 1. Run only on the client after hydration completes
   useEffect(() => {
-    setMounted(true);
     const savedTheme = localStorage.getItem("theme");
-
-    // Check if user has a saved preference, otherwise default to system preferences
     const isDark =
       savedTheme === "dark" ||
       (!savedTheme &&
         window.matchMedia("(prefers-color-scheme: dark)").matches);
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDark(isDark);
+    setMounted(true);
   }, []);
 
-  // 2. Synchronize the HTML class when state changes
+  // Synchronize the HTML class when state changes
   useEffect(() => {
-    if (!mounted) return; // Skip during initial load setup
+    if (!mounted) return;
 
     if (dark) {
       document.documentElement.classList.add("dark");
@@ -38,7 +36,7 @@ export function ThemeToggle() {
     setDark((prev) => !prev);
   };
 
-  // 3. Render a completely identical placeholder structure during server side compilation
+  // Render a completely identical placeholder structure during server side compilation
   if (!mounted) {
     return (
       <div
