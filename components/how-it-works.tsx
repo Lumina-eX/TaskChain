@@ -47,7 +47,7 @@ export function HowItWorks() {
               <div key={step.title} className="relative">
                 <div className="flex flex-col items-center text-center space-y-4">
                   <div className="relative">
-                    <div className="absolute -top-4 -left-4 text-6xl font-bold text-primary/10">
+                    <div className="absolute -top-4 -left-4 text-6xl font-bold text-primary/20">
                       {step.number}
                     </div>
                     <div className="relative h-16 w-16 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center">

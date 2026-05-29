@@ -17,14 +17,19 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20' # Use the project's current version
-          cache: 'npm'       # Technical Note: Configure caching for speed
+          node-version: '20'
+          cache: 'npm'
 
       - name: Install Dependencies
-        run: npm ci          # Technical Note: Cleaner/faster than 'npm install'
+        run: npm ci
 
       - name: Run Lint
         run: npm run lint
 
       - name: Build Project
-        run: npm run build   # The core requirement of this feature
+        run: npm run build
+        env:
+          # Provide a placeholder so Next.js module evaluation doesn't throw
+          # during the build. No real DB connection is made at build time.
+          DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgres://build:build@localhost/build' }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET || 'build-time-placeholder-secret-32chars!!' }}
