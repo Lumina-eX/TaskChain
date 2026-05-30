@@ -12,6 +12,7 @@
 
 // Service singleton (primary entry point)
 export { escrowService, EscrowService } from './service'
+export { escrowTransactionHistoryService, EscrowTransactionHistoryService } from './history'
 
 // All input/output types and interfaces
 export type {
@@ -44,6 +45,14 @@ export type {
   IEscrowBlockchainAdapter,
   IEscrowRepository,
 } from './types'
+
+export type {
+  EscrowTransactionLog,
+  EscrowTransactionLogPage,
+  CreateEscrowTransactionLogInput,
+  EscrowTransactionType,
+  EscrowTransactionStatus,
+} from './history'
 
 // Error classes and HTTP status helper
 export {
