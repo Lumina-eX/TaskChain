@@ -33,6 +33,8 @@ pub enum DataKey {
     Token,
     Milestones,
     IsFunded,
+    ClientApproval(u32),
+    FreelancerApproval(u32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,6 +48,8 @@ pub enum Error {
     InvalidMilestoneStatus = 6,
     Unauthorized = 7,
     ZeroAmount = 8,
+    InsufficientApprovals = 9,
+    AlreadyApproved = 10,
 }
 
 #[contract]
@@ -165,6 +169,12 @@ impl EscrowContract {
         let client: Address = env.storage().instance().get(&DataKey::Client).ok_or(Error::NotInitialized)?;
         client.require_auth();
 
+        // Check if already approved by client
+        let approval_key = DataKey::ClientApproval(milestone_id);
+        if env.storage().instance().has(&approval_key) {
+            return Err(Error::AlreadyApproved);
+        }
+
         let milestones: Vec<Milestone> = env.storage().instance().get(&DataKey::Milestones).ok_or(Error::NotInitialized)?;
         let mut found = false;
         let mut updated_milestones = Vec::new(&env);
@@ -176,6 +186,8 @@ impl EscrowContract {
                 if milestone.status != MilestoneStatus::Submitted {
                     return Err(Error::InvalidMilestoneStatus);
                 }
+                // Set client approval
+                env.storage().instance().set(&approval_key, &true);
                 milestone.status = MilestoneStatus::Approved;
             }
             updated_milestones.push_back(milestone);
@@ -189,8 +201,41 @@ impl EscrowContract {
         Ok(())
     }
 
+    /// Freelancer confirms milestone completion (second signature for multi-sig release).
+    pub fn freelancer_confirm(env: Env, milestone_id: u32) -> Result<(), Error> {
+        let freelancer: Address = env.storage().instance().get(&DataKey::Freelancer).ok_or(Error::NotInitialized)?;
+        freelancer.require_auth();
+
+        let milestones: Vec<Milestone> = env.storage().instance().get(&DataKey::Milestones).ok_or(Error::NotInitialized)?;
+        let mut found = false;
+
+        for i in 0..milestones.len() {
+            let milestone = milestones.get(i).unwrap();
+            if milestone.id == milestone_id {
+                found = true;
+                if milestone.status != MilestoneStatus::Approved {
+                    return Err(Error::InvalidMilestoneStatus);
+                }
+                // Check if already confirmed by freelancer
+                let approval_key = DataKey::FreelancerApproval(milestone_id);
+                if env.storage().instance().has(&approval_key) {
+                    return Err(Error::AlreadyApproved);
+                }
+                // Set freelancer confirmation
+                env.storage().instance().set(&approval_key, &true);
+            }
+        }
+
+        if !found {
+            return Err(Error::MilestoneNotFound);
+        }
+
+        Ok(())
+    }
+
     /// Transfers funds of an approved milestone to the freelancer.
-    /// Can be triggered by either client or freelancer.
+    /// Requires multi-signature: both client and freelancer must have approved.
+    /// Can be triggered by either client or freelancer after both approvals.
     pub fn release(env: Env, milestone_id: u32, caller: Address) -> Result<(), Error> {
         caller.require_auth();
 
@@ -199,6 +244,17 @@ impl EscrowContract {
 
         if caller != client && caller != freelancer {
             return Err(Error::Unauthorized);
+        }
+
+        // Check multi-signature requirement: both client and freelancer must have approved
+        let client_approval_key = DataKey::ClientApproval(milestone_id);
+        let freelancer_approval_key = DataKey::FreelancerApproval(milestone_id);
+        
+        let client_approved: bool = env.storage().instance().get(&client_approval_key).unwrap_or(false);
+        let freelancer_approved: bool = env.storage().instance().get(&freelancer_approval_key).unwrap_or(false);
+        
+        if !client_approved || !freelancer_approved {
+            return Err(Error::InsufficientApprovals);
         }
 
         let milestones: Vec<Milestone> = env.storage().instance().get(&DataKey::Milestones).ok_or(Error::NotInitialized)?;
@@ -276,6 +332,7 @@ impl EscrowContract {
 
     /// Puts a milestone into dispute, halting regular flow and delegating resolution to the arbiter.
     /// Can be raised by client or freelancer.
+    /// Clears any existing approvals when dispute is raised.
     pub fn dispute(env: Env, milestone_id: u32, caller: Address) -> Result<(), Error> {
         caller.require_auth();
 
@@ -294,10 +351,13 @@ impl EscrowContract {
             let mut milestone = milestones.get(i).unwrap();
             if milestone.id == milestone_id {
                 found = true;
-                if milestone.status != MilestoneStatus::Funded && milestone.status != MilestoneStatus::Submitted {
+                if milestone.status != MilestoneStatus::Funded && milestone.status != MilestoneStatus::Submitted && milestone.status != MilestoneStatus::Approved {
                     return Err(Error::InvalidMilestoneStatus);
                 }
                 milestone.status = MilestoneStatus::Disputed;
+                // Clear approvals when dispute is raised
+                env.storage().instance().remove(&DataKey::ClientApproval(milestone_id));
+                env.storage().instance().remove(&DataKey::FreelancerApproval(milestone_id));
             }
             updated_milestones.push_back(milestone);
         }
@@ -380,6 +440,16 @@ impl EscrowContract {
 
     pub fn is_funded(env: Env) -> bool {
         env.storage().instance().get(&DataKey::IsFunded).unwrap_or(false)
+    }
+
+    /// Check if client has approved a specific milestone
+    pub fn has_client_approval(env: Env, milestone_id: u32) -> bool {
+        env.storage().instance().get(&DataKey::ClientApproval(milestone_id)).unwrap_or(false)
+    }
+
+    /// Check if freelancer has approved a specific milestone
+    pub fn has_freelancer_approval(env: Env, milestone_id: u32) -> bool {
+        env.storage().instance().get(&DataKey::FreelancerApproval(milestone_id)).unwrap_or(false)
     }
 }
 
