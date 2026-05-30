@@ -16,6 +16,7 @@ struct TestSetup {
     contract_id: Address,
     escrow_client: EscrowContractClient<'static>,
     token_address: Address,
+    admin: Address,
     client: Address,
     freelancer: Address,
     arbiter: Address,
@@ -25,6 +26,7 @@ fn setup_test() -> TestSetup {
     let env = Env::default();
     env.mock_all_auths();
 
+    let admin = Address::generate(&env);
     let client = Address::generate(&env);
     let freelancer = Address::generate(&env);
     let arbiter = Address::generate(&env);
@@ -42,6 +44,7 @@ fn setup_test() -> TestSetup {
         contract_id,
         escrow_client,
         token_address,
+        admin,
         client,
         freelancer,
         arbiter,
@@ -70,7 +73,7 @@ fn test_happy_path() {
     let milestones = vec![&env, milestone_1, milestone_2];
 
     // Initialize
-    escrow.initialize(&setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
+    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
 
     // Verify getters
     assert_eq!(escrow.get_client(), setup.client);
@@ -126,7 +129,7 @@ fn test_voluntary_refund() {
     };
     let milestones = vec![&env, milestone];
 
-    escrow.initialize(&setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
+    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
     escrow.fund();
 
     // Freelancer triggers voluntary refund
@@ -156,7 +159,7 @@ fn test_dispute_and_resolve_to_freelancer() {
     };
     let milestones = vec![&env, milestone];
 
-    escrow.initialize(&setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
+    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
     escrow.fund();
     escrow.submit_milestone(&1);
 
@@ -188,7 +191,7 @@ fn test_dispute_and_resolve_to_client() {
     };
     let milestones = vec![&env, milestone];
 
-    escrow.initialize(&setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
+    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
     escrow.fund();
 
     // Freelancer disputes milestone (perhaps client won't approve)
@@ -220,9 +223,9 @@ fn test_double_initialization_fails() {
     };
     let milestones = vec![&env, milestone];
 
-    escrow.initialize(&setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
+    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
     // Double initialize should trigger AlreadyInitialized error (error code 1)
-    escrow.initialize(&setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
+    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
 }
 
 #[test]
@@ -240,7 +243,7 @@ fn test_zero_amount_fails() {
     };
     let milestones = vec![&env, milestone];
 
-    escrow.initialize(&setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
+    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
 }
 
 #[test]
@@ -258,7 +261,7 @@ fn test_unauthorized_release_fails() {
     };
     let milestones = vec![&env, milestone];
 
-    escrow.initialize(&setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
+    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
     escrow.fund();
     escrow.submit_milestone(&1);
     escrow.approve(&1);
@@ -266,4 +269,23 @@ fn test_unauthorized_release_fails() {
     // Random address tries to trigger release
     let stranger = Address::generate(&env);
     escrow.release(&1, &stranger);
+}
+
+#[test]
+fn test_version() {
+    let setup = setup_test();
+    let escrow = setup.escrow_client;
+    let env = setup.env;
+
+    let milestone = Milestone {
+        id: 1,
+        amount: 100,
+        status: MilestoneStatus::Pending,
+        description: String::from_str(&env, "Milestone"),
+    };
+    let milestones = vec![&env, milestone];
+
+    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
+
+    assert_eq!(escrow.version(), 1);
 }

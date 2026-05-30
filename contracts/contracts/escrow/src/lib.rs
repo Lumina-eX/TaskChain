@@ -33,6 +33,8 @@ pub enum DataKey {
     Token,
     Milestones,
     IsFunded,
+    Admin,
+    Version,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,6 +58,7 @@ impl EscrowContract {
     /// Initialize the escrow agreement with participant addresses, the payment token, and the milestones.
     pub fn initialize(
         env: Env,
+        admin: Address,
         client: Address,
         freelancer: Address,
         arbiter: Address,
@@ -78,6 +81,8 @@ impl EscrowContract {
             }
         }
 
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::Version, &1u32);
         env.storage().instance().set(&DataKey::Client, &client);
         env.storage().instance().set(&DataKey::Freelancer, &freelancer);
         env.storage().instance().set(&DataKey::Arbiter, &arbiter);
@@ -380,6 +385,20 @@ impl EscrowContract {
 
     pub fn is_funded(env: Env) -> bool {
         env.storage().instance().get(&DataKey::IsFunded).unwrap_or(false)
+    }
+
+    /// Upgrades the contract to a new WASM executable
+    pub fn upgrade(env: Env, new_wasm_hash: soroban_sdk::BytesN<32>) -> Result<(), Error> {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+        Ok(())
+    }
+
+    /// Returns the current version of the contract
+    pub fn version(env: Env) -> u32 {
+        env.storage().instance().get(&DataKey::Version).unwrap_or(0)
     }
 }
 
