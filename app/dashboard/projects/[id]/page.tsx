@@ -16,6 +16,7 @@ import {
   EscrowStatusTracker,
   type EscrowStage,
 } from "@/components/dashboard/escrow-status-tracker";
+import { MilestoneProgressTracker } from "@/components/dashboard/milestone-progress-tracker";
 
 interface Milestone {
   id: string;
@@ -78,6 +79,48 @@ export default function ProjectDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [showApprovalDialog, setShowApprovalDialog] = useState(false);
   const [now] = useState(() => Date.now());
+
+  const handleMilestoneStatusUpdate = async (milestoneId: string, newStatus: string) => {
+    try {
+      const res = await fetch(`/api/milestones/${milestoneId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || "Failed to update milestone status");
+      }
+      
+      // Update local state dynamically
+      setMilestones((prev) =>
+        prev.map((m) =>
+          m.id === milestoneId
+            ? {
+                ...m,
+                status: newStatus,
+              }
+            : m
+        )
+      );
+
+      // Trigger standard API re-fetch for absolute sync
+      const resProj = await fetch(`/api/projects/${id}`, {
+        headers: getAuthHeaders(),
+      });
+      if (resProj.ok) {
+        const data = await resProj.json();
+        setProject(data.project);
+        setMilestones(data.milestones ?? []);
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Failed to update milestone status. Make sure you are authorized.");
+    }
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -202,61 +245,12 @@ export default function ProjectDetailPage() {
           </TabsList>
 
           <TabsContent value="milestones" className="space-y-4 mt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-semibold">Project Milestones</h2>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {completedMilestones} of {milestones.length} completed
-                </p>
-              </div>
-              {project.status === "in_progress" && (
-                <Button onClick={() => setShowApprovalDialog(true)} className="group">
-                  <CheckCircle2 className="mr-2 h-4 w-4 group-hover:scale-110 transition-transform" />
-                  Approve All
-                </Button>
-              )}
-            </div>
-
-            {milestones.length === 0 ? (
-              <p className="text-muted-foreground text-sm py-8 text-center">
-                No milestones for this project.
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {milestones.map((m, i) => {
-                  const mCfg = milestoneStatusConfig[m.status] ?? milestoneStatusConfig.pending;
-                  return (
-                    <div
-                      key={m.id}
-                      className="flex items-start justify-between p-4 rounded-lg border border-border/40 bg-card/50"
-                    >
-                      <div className="flex items-start gap-3 flex-1">
-                        <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary shrink-0 mt-0.5">
-                          {i + 1}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold">{m.title}</p>
-                          {m.description && (
-                            <p className="text-sm text-muted-foreground mt-0.5">{m.description}</p>
-                          )}
-                          {m.due_date && (
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Due {new Date(m.due_date).toLocaleDateString()}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <div className="text-right shrink-0 ml-4">
-                        <p className="font-semibold">
-                          ${parseFloat(m.amount).toLocaleString()} {m.currency}
-                        </p>
-                        <p className={`text-xs mt-1 ${mCfg.color}`}>{mCfg.label}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            <MilestoneProgressTracker
+              milestones={milestones}
+              onStatusUpdate={handleMilestoneStatusUpdate}
+              userRole="client"
+              contractAddress={project.contract_address || undefined}
+            />
           </TabsContent>
 
           <TabsContent value="activity" className="space-y-4 mt-6">
