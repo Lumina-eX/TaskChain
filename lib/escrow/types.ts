@@ -26,6 +26,7 @@ export type EscrowStatus =
   | 'refunded'
 
 export type MilestoneStatus =
+  | 'auto_expired'
   | 'pending'
   | 'in_progress'
   | 'submitted'
@@ -131,6 +132,8 @@ export interface MilestoneInput {
   description?: string
   amount: string
   dueDate?: string
+  /** Unix timestamp (seconds) for milestone deadline. After this, the milestone can be auto-expired. */
+  deadline?: number
   sortOrder?: number
 }
 
