@@ -2,12 +2,13 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { 
-  LayoutDashboard, 
-  FileText, 
-  AlertCircle, 
+import {
+  LayoutDashboard,
+  FileText,
+  AlertCircle,
   LogOut,
   ChevronRight,
+  UserCircle,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -32,6 +33,11 @@ const navItems = [
     label: 'Disputes',
     href: '/dashboard/disputes',
     icon: AlertCircle,
+  },
+  {
+    label: 'Profile',
+    href: '/dashboard/profile',
+    icon: UserCircle,
   },
 ]
 

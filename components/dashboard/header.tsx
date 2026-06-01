@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { Menu, Bell, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -48,9 +49,11 @@ export function DashboardHeader({ onMenuClick }: DashboardHeaderProps) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem className="flex items-center gap-2">
-                <User className="h-4 w-4" />
-                Profile
+              <DropdownMenuItem asChild>
+                <Link href="/dashboard/profile" className="flex items-center gap-2">
+                  <User className="h-4 w-4" />
+                  Profile
+                </Link>
               </DropdownMenuItem>
               <DropdownMenuItem>Settings</DropdownMenuItem>
               <DropdownMenuItem className="text-destructive">Logout</DropdownMenuItem>

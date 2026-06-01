@@ -12,12 +12,14 @@ pub enum MilestoneStatus {
     Approved = 3,    // Approved by client, ready for release
     Released = 4,    // Funds successfully transferred to freelancer
     Refunded = 5,    // Funds returned to client
-    Disputed = 6,    // Under dispute, waiting for arbiter resolution
+    Disputed = 6,
+    AutoExpired = 7,    // Under dispute, waiting for arbiter resolution
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[contracttype]
 pub struct Milestone {
+    pub deadline: u64,
     pub id: u32,
     pub amount: i128,
     pub status: MilestoneStatus,
@@ -33,6 +35,9 @@ pub enum DataKey {
     Token,
     Milestones,
     IsFunded,
+    ClientApproval(u32),
+    FreelancerApproval(u32),
+    MilestoneDeadline(u32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,6 +51,10 @@ pub enum Error {
     InvalidMilestoneStatus = 6,
     Unauthorized = 7,
     ZeroAmount = 8,
+    InsufficientApprovals = 9,
+    AlreadyApproved = 10,
+    DeadlineExceeded = 11,
+    AlreadyExpired = 12,
 }
 
 #[contract]
@@ -83,6 +92,14 @@ impl EscrowContract {
         env.storage().instance().set(&DataKey::Arbiter, &arbiter);
         env.storage().instance().set(&DataKey::Token, &token);
         env.storage().instance().set(&DataKey::Milestones, &milestones);
+
+        // Store milestone deadlines for time-based validation
+        for i in 0..milestones.len() {
+            let m = milestones.get(i).unwrap();
+            if m.deadline > 0 {
+                env.storage().instance().set(&DataKey::MilestoneDeadline(m.id), &m.deadline);
+            }
+        }
         env.storage().instance().set(&DataKey::IsFunded, &false);
 
         Ok(())
@@ -147,7 +164,10 @@ impl EscrowContract {
                 if milestone.status != MilestoneStatus::Funded {
                     return Err(Error::InvalidMilestoneStatus);
                 }
-                milestone.status = MilestoneStatus::Submitted;
+                if milestone.deadline > 0 && env.ledger().timestamp() > milestone.deadline {
+                        return Err(Error::DeadlineExceeded);
+                    }
+                    milestone.status = MilestoneStatus::Submitted;
             }
             updated_milestones.push_back(milestone);
         }
@@ -165,6 +185,12 @@ impl EscrowContract {
         let client: Address = env.storage().instance().get(&DataKey::Client).ok_or(Error::NotInitialized)?;
         client.require_auth();
 
+        // Check if already approved by client
+        let approval_key = DataKey::ClientApproval(milestone_id);
+        if env.storage().instance().has(&approval_key) {
+            return Err(Error::AlreadyApproved);
+        }
+
         let milestones: Vec<Milestone> = env.storage().instance().get(&DataKey::Milestones).ok_or(Error::NotInitialized)?;
         let mut found = false;
         let mut updated_milestones = Vec::new(&env);
@@ -176,6 +202,8 @@ impl EscrowContract {
                 if milestone.status != MilestoneStatus::Submitted {
                     return Err(Error::InvalidMilestoneStatus);
                 }
+                // Set client approval
+                env.storage().instance().set(&approval_key, &true);
                 milestone.status = MilestoneStatus::Approved;
             }
             updated_milestones.push_back(milestone);
@@ -189,8 +217,41 @@ impl EscrowContract {
         Ok(())
     }
 
+    /// Freelancer confirms milestone completion (second signature for multi-sig release).
+    pub fn freelancer_confirm(env: Env, milestone_id: u32) -> Result<(), Error> {
+        let freelancer: Address = env.storage().instance().get(&DataKey::Freelancer).ok_or(Error::NotInitialized)?;
+        freelancer.require_auth();
+
+        let milestones: Vec<Milestone> = env.storage().instance().get(&DataKey::Milestones).ok_or(Error::NotInitialized)?;
+        let mut found = false;
+
+        for i in 0..milestones.len() {
+            let milestone = milestones.get(i).unwrap();
+            if milestone.id == milestone_id {
+                found = true;
+                if milestone.status != MilestoneStatus::Approved {
+                    return Err(Error::InvalidMilestoneStatus);
+                }
+                // Check if already confirmed by freelancer
+                let approval_key = DataKey::FreelancerApproval(milestone_id);
+                if env.storage().instance().has(&approval_key) {
+                    return Err(Error::AlreadyApproved);
+                }
+                // Set freelancer confirmation
+                env.storage().instance().set(&approval_key, &true);
+            }
+        }
+
+        if !found {
+            return Err(Error::MilestoneNotFound);
+        }
+
+        Ok(())
+    }
+
     /// Transfers funds of an approved milestone to the freelancer.
-    /// Can be triggered by either client or freelancer.
+    /// Requires multi-signature: both client and freelancer must have approved.
+    /// Can be triggered by either client or freelancer after both approvals.
     pub fn release(env: Env, milestone_id: u32, caller: Address) -> Result<(), Error> {
         caller.require_auth();
 
@@ -199,6 +260,17 @@ impl EscrowContract {
 
         if caller != client && caller != freelancer {
             return Err(Error::Unauthorized);
+        }
+
+        // Check multi-signature requirement: both client and freelancer must have approved
+        let client_approval_key = DataKey::ClientApproval(milestone_id);
+        let freelancer_approval_key = DataKey::FreelancerApproval(milestone_id);
+        
+        let client_approved: bool = env.storage().instance().get(&client_approval_key).unwrap_or(false);
+        let freelancer_approved: bool = env.storage().instance().get(&freelancer_approval_key).unwrap_or(false);
+        
+        if !client_approved || !freelancer_approved {
+            return Err(Error::InsufficientApprovals);
         }
 
         let milestones: Vec<Milestone> = env.storage().instance().get(&DataKey::Milestones).ok_or(Error::NotInitialized)?;
@@ -276,6 +348,7 @@ impl EscrowContract {
 
     /// Puts a milestone into dispute, halting regular flow and delegating resolution to the arbiter.
     /// Can be raised by client or freelancer.
+    /// Clears any existing approvals when dispute is raised.
     pub fn dispute(env: Env, milestone_id: u32, caller: Address) -> Result<(), Error> {
         caller.require_auth();
 
@@ -294,10 +367,13 @@ impl EscrowContract {
             let mut milestone = milestones.get(i).unwrap();
             if milestone.id == milestone_id {
                 found = true;
-                if milestone.status != MilestoneStatus::Funded && milestone.status != MilestoneStatus::Submitted {
+                if milestone.status != MilestoneStatus::Funded && milestone.status != MilestoneStatus::Submitted && milestone.status != MilestoneStatus::Approved {
                     return Err(Error::InvalidMilestoneStatus);
                 }
                 milestone.status = MilestoneStatus::Disputed;
+                // Clear approvals when dispute is raised
+                env.storage().instance().remove(&DataKey::ClientApproval(milestone_id));
+                env.storage().instance().remove(&DataKey::FreelancerApproval(milestone_id));
             }
             updated_milestones.push_back(milestone);
         }
@@ -356,6 +432,70 @@ impl EscrowContract {
         Ok(())
     }
 
+    
+    /// Auto-expire a milestone that has exceeded its deadline without being completed.
+    /// Refunds the milestone amount back to the client.
+    /// Can be called by anyone once the deadline has passed.
+    pub fn auto_expire(env: Env, milestone_id: u32) -> Result<(), Error> {
+        let milestones: Vec<Milestone> = env.storage().instance().get(&DataKey::Milestones).ok_or(Error::NotInitialized)?;
+        let mut found = false;
+        let mut transfer_amount: i128 = 0;
+        let mut updated_milestones = Vec::new(&env);
+
+        for i in 0..milestones.len() {
+            let mut milestone = milestones.get(i).unwrap();
+            if milestone.id == milestone_id {
+                found = true;
+
+                // Check deadline exists and has passed
+                if milestone.deadline == 0 {
+                    return Err(Error::InvalidMilestoneStatus);
+                }
+                if env.ledger().timestamp() <= milestone.deadline {
+                    return Err(Error::InvalidMilestoneStatus);
+                }
+
+                // Only expire if not yet released, refunded, or disputed
+                if milestone.status == MilestoneStatus::Released ||
+                   milestone.status == MilestoneStatus::Refunded ||
+                   milestone.status == MilestoneStatus::Disputed ||
+                   milestone.status == MilestoneStatus::AutoExpired {
+                    return Err(Error::AlreadyExpired);
+                }
+
+                transfer_amount = milestone.amount;
+                milestone.status = MilestoneStatus::AutoExpired;
+            }
+            updated_milestones.push_back(milestone);
+        }
+
+        if !found {
+            return Err(Error::MilestoneNotFound);
+        }
+
+        // Refund the expired milestone amount to the client
+        let client: Address = env.storage().instance().get(&DataKey::Client).ok_or(Error::NotInitialized)?;
+        let token_address: Address = env.storage().instance().get(&DataKey::Token).ok_or(Error::NotInitialized)?;
+        let token_client = token::Client::new(&env, &token_address);
+        token_client.transfer(&env.current_contract_address(), &client, &transfer_amount);
+
+        env.storage().instance().set(&DataKey::Milestones, &updated_milestones);
+        Ok(())
+    }
+
+    /// Check if a milestone has passed its deadline.
+    pub fn is_milestone_expired(env: Env, milestone_id: u32) -> Result<bool, Error> {
+        let deadline: u64 = env.storage().instance().get(&DataKey::MilestoneDeadline(milestone_id)).unwrap_or(0);
+        if deadline == 0 {
+            return Ok(false);
+        }
+        Ok(env.ledger().timestamp() > deadline)
+    }
+
+    /// Get the deadline for a specific milestone.
+    pub fn get_milestone_deadline(env: Env, milestone_id: u32) -> Result<u64, Error> {
+        env.storage().instance().get(&DataKey::MilestoneDeadline(milestone_id)).ok_or(Error::MilestoneNotFound)
+    }
     // --- State Getters ---
 
     pub fn get_client(env: Env) -> Result<Address, Error> {
@@ -380,6 +520,16 @@ impl EscrowContract {
 
     pub fn is_funded(env: Env) -> bool {
         env.storage().instance().get(&DataKey::IsFunded).unwrap_or(false)
+    }
+
+    /// Check if client has approved a specific milestone
+    pub fn has_client_approval(env: Env, milestone_id: u32) -> bool {
+        env.storage().instance().get(&DataKey::ClientApproval(milestone_id)).unwrap_or(false)
+    }
+
+    /// Check if freelancer has approved a specific milestone
+    pub fn has_freelancer_approval(env: Env, milestone_id: u32) -> bool {
+        env.storage().instance().get(&DataKey::FreelancerApproval(milestone_id)).unwrap_or(false)
     }
 }
 
