@@ -2,42 +2,56 @@
 
 import React, { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { isConnected, requestAccess, getAddress, signMessage } from '@stellar/freighter-api'
+import { signMessage } from '@stellar/freighter-api'
 import { Button } from '@/components/ui/button'
-import { Wallet, LogOut, AlertCircle, Loader2, ArrowLeft, FlaskConical } from 'lucide-react'
+import {
+  Wallet,
+  LogOut,
+  AlertCircle,
+  Loader2,
+  ArrowLeft,
+  FlaskConical,
+  AlertTriangle,
+} from 'lucide-react'
 import Link from 'next/link'
+import {
+  useStellarWallet,
+  truncateStellarAddress,
+} from '@/components/wallet-provider'
 
 const IS_DEV = process.env.NODE_ENV !== 'production'
 
 export default function LoginPage() {
   const router = useRouter()
-  const [address, setAddress] = useState<string | null>(null)
+
+  // ── Wallet context ────────────────────────────────────────────────────────
+  const {
+    address,
+    isConnected: walletIsConnected,
+    isConnecting,
+    isWrongNetwork,
+    network,
+    connect,
+    disconnect,
+  } = useStellarWallet()
+
+  // ── Local state ──────────────────────────────────────────────────────────
   const [isInitializing, setIsInitializing] = useState(true)
-  const [isConnecting, setIsConnecting] = useState(false)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [isMocking, setIsMocking] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Initialize session from local storage on mount
+  // ── Session check on mount ────────────────────────────────────────────────
   useEffect(() => {
-    const initSession = async () => {
+    const checkSession = async () => {
       try {
         const savedAddress = localStorage.getItem('stellar_wallet_address')
-        if (savedAddress) {
-          // Verify if still connected
-          const connectedResponse = await isConnected()
-          if (connectedResponse.isConnected) {
-            // Also check if backend session is still active
-            const meRes = await fetch('/api/auth/me')
-            if (meRes.ok) {
-              setAddress(savedAddress)
-              router.push('/dashboard')
-              return
-            }
+        if (savedAddress && walletIsConnected) {
+          const meRes = await fetch('/api/auth/me')
+          if (meRes.ok) {
+            router.push('/dashboard')
+            return
           }
-          // Clear if not fully verified
-          localStorage.removeItem('stellar_wallet_address')
-          localStorage.removeItem('tc_dev_access_token')
         }
       } catch (err) {
         console.error('Failed to initialize wallet session:', err)
@@ -46,48 +60,42 @@ export default function LoginPage() {
       }
     }
 
-    // Slight delay to ensure Freighter extension is loaded
-    setTimeout(initSession, 500)
-  }, [router])
+    // Small delay to let provider's first sync complete
+    const t = setTimeout(checkSession, 700)
+    return () => clearTimeout(t)
+  }, [router, walletIsConnected])
 
+  // ── Step 1: Connect wallet ────────────────────────────────────────────────
   const handleConnect = async () => {
     setError(null)
-    setIsConnecting(true)
-    setStatusMessage('Connecting wallet...')
+    // Delegates to the global provider (handles requestAccess + address/network sync)
+    await connect()
+  }
+
+  // ── Step 2: Sign message & authenticate ─────────────────────────────────
+  const handleSign = async () => {
+    setError(null)
+
+    if (!address) {
+      setError('No wallet connected. Please connect Freighter first.')
+      return
+    }
+
+    // Block if on the wrong network
+    if (isWrongNetwork) {
+      setError(
+        `Wrong network detected (${network}). Please switch your Freighter wallet to Stellar Testnet and try again.`
+      )
+      return
+    }
+
     try {
-      // Check if Freighter is installed
-      const connectedResponse = await isConnected()
-      if (connectedResponse.error && !connectedResponse.isConnected) {
-        throw new Error(connectedResponse.error.message || 'Freighter wallet not detected. Please install the extension.')
-      }
-
-      // Request connection
-      const accessResponse = await requestAccess()
-      if (accessResponse.error) {
-        throw new Error(accessResponse.error.message || 'Connection request was rejected.')
-      }
-
-      let walletAddress = accessResponse.address;
-
-      // Fallback if address is missing but no error was caught
-      if (!walletAddress) {
-        const addressResponse = await getAddress()
-        if (addressResponse.error) {
-          throw new Error(addressResponse.error.message || 'Failed to retrieve wallet address.')
-        }
-        walletAddress = addressResponse.address
-      }
-
-      if (!walletAddress) {
-        throw new Error('Failed to retrieve wallet address from Freighter.')
-      }
-
       // 1. Fetch Nonce & Message
       setStatusMessage('Requesting authentication message...')
       const nonceRes = await fetch('/api/auth/nonce', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress }),
+        body: JSON.stringify({ walletAddress: address }),
       })
       const nonceData = await nonceRes.json()
       if (!nonceRes.ok) {
@@ -99,13 +107,15 @@ export default function LoginPage() {
       // 2. Request signature via Freighter signMessage
       setStatusMessage('Approve signature request...')
       const signResponse = await signMessage(message)
-      
+
       let signature: string | undefined
       if (typeof signResponse === 'string') {
         signature = signResponse
       } else if (signResponse && typeof signResponse === 'object') {
         if (signResponse.error) {
-          throw new Error(signResponse.error.message || signResponse.error || 'Message signing was rejected.')
+          throw new Error(
+            signResponse.error.message || signResponse.error || 'Message signing was rejected.'
+          )
         }
         signature = signResponse.signedMessage
       }
@@ -119,12 +129,7 @@ export default function LoginPage() {
       const verifyRes = await fetch('/api/auth/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          walletAddress,
-          nonce,
-          signature,
-          message,
-        }),
+        body: JSON.stringify({ walletAddress: address, nonce, signature, message }),
       })
 
       const verifyData = await verifyRes.json()
@@ -132,22 +137,21 @@ export default function LoginPage() {
         throw new Error(verifyData?.error || 'Signature verification failed.')
       }
 
-      // 4. Set local storage & redirect
-      setAddress(walletAddress)
-      localStorage.setItem('stellar_wallet_address', walletAddress)
+      // 4. Persist & redirect
+      localStorage.setItem('stellar_wallet_address', address)
       if (verifyData.accessToken) {
         localStorage.setItem('tc_dev_access_token', verifyData.accessToken)
       }
       router.push('/dashboard')
-    } catch (err: any) {
-      console.error('Connection error:', err)
-      setError(err?.message || 'Unable to connect wallet. Please try again.')
+    } catch (err: unknown) {
+      console.error('Sign-in error:', err)
+      setError(err instanceof Error ? err.message : 'Unable to authenticate. Please try again.')
     } finally {
-      setIsConnecting(false)
       setStatusMessage(null)
     }
   }
 
+  // ── Dev-only mock login bypass ─────────────────────────────────────────
   const handleMockLogin = async () => {
     setError(null)
     setIsMocking(true)
@@ -155,10 +159,7 @@ export default function LoginPage() {
       const res = await fetch('/api/auth/mock', { method: 'POST' })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error ?? 'Mock auth failed')
-      setAddress(data.walletAddress)
       localStorage.setItem('stellar_wallet_address', data.walletAddress)
-      // Store the access token so the wizard can send it as a Bearer header
-      // in case the httpOnly cookie isn't forwarded by the browser in dev.
       if (data.accessToken) {
         localStorage.setItem('tc_dev_access_token', data.accessToken)
       }
@@ -171,17 +172,11 @@ export default function LoginPage() {
   }
 
   const handleDisconnect = () => {
-    setAddress(null)
-    localStorage.removeItem('stellar_wallet_address')
-    localStorage.removeItem('tc_dev_access_token')
+    disconnect()
     setError(null)
   }
 
-  const formatAddress = (addr: string) => {
-    if (!addr || addr.length <= 10) return addr;
-    return `${addr.substring(0, 5)}...${addr.substring(addr.length - 4)}`
-  }
-
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <main className="min-h-screen flex items-center justify-center bg-background p-4 relative overflow-hidden">
       {/* Back button */}
@@ -194,16 +189,18 @@ export default function LoginPage() {
         </Button>
       </div>
 
-      {/* Background decorations matching the app's aesthetic */}
+      {/* Background decorations */}
       <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-primary/20 rounded-full blur-[120px] opacity-20 pointer-events-none" />
       <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-accent/20 rounded-full blur-[100px] opacity-20 pointer-events-none" />
 
       <div className="relative z-10 w-full max-w-md bg-card border border-border/50 rounded-2xl p-8 shadow-2xl backdrop-blur-sm">
         <div className="flex flex-col items-center text-center space-y-6">
+          {/* Icon */}
           <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20">
             <Wallet className="w-8 h-8 text-primary" />
           </div>
 
+          {/* Header */}
           <div className="space-y-2">
             <h1 className="text-2xl font-bold tracking-tight text-card-foreground">Connect Wallet</h1>
             <p className="text-sm text-muted-foreground">
@@ -211,6 +208,7 @@ export default function LoginPage() {
             </p>
           </div>
 
+          {/* Error banner */}
           {error && (
             <div className="w-full p-4 rounded-lg bg-destructive/10 border border-destructive/20 flex items-start space-x-3 text-left">
               <AlertCircle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
@@ -218,31 +216,80 @@ export default function LoginPage() {
             </div>
           )}
 
+          {/* ── State: Initializing ─────────────────────────────────────── */}
           {isInitializing ? (
             <div className="w-full h-12 flex items-center justify-center text-muted-foreground">
               <Loader2 className="w-5 h-5 animate-spin" />
             </div>
+
           ) : address ? (
+            /* ── State: Wallet connected ─────────────────────────────── */
             <div className="w-full space-y-4">
+
+              {/* Connected wallet info */}
               <div className="p-4 rounded-lg bg-secondary/50 border border-border flex items-center justify-between">
-                <span className="text-sm font-medium text-foreground">Connected</span>
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-sm font-medium text-foreground">Connected</span>
+                </div>
                 <span className="text-sm font-mono bg-background px-2 py-1 rounded border border-border/50">
-                  {formatAddress(address)}
+                  {truncateStellarAddress(address)}
                 </span>
               </div>
 
+              {/* Wrong-network warning */}
+              {isWrongNetwork && (
+                <div className="w-full p-4 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-start gap-3 text-left">
+                  <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-amber-600 dark:text-amber-400">Wrong Network</p>
+                    <p className="text-xs text-amber-700/80 dark:text-amber-300/80 mt-0.5">
+                      Your Freighter wallet is set to <strong>{network}</strong>. TaskChain requires{' '}
+                      <strong>Stellar Testnet</strong>. Open Freighter → Settings → Network and switch, then try again.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Sign-in button */}
               <Button
-                variant="destructive"
+                id="login-sign-button"
                 className="w-full"
+                size="lg"
+                onClick={handleSign}
+                disabled={isConnecting || isWrongNetwork || !!statusMessage}
+              >
+                {statusMessage ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    {statusMessage}
+                  </>
+                ) : isWrongNetwork ? (
+                  <>
+                    <AlertTriangle className="w-4 h-4 mr-2 text-amber-500" />
+                    Switch to Testnet First
+                  </>
+                ) : (
+                  'Sign In with Freighter'
+                )}
+              </Button>
+
+              <Button
+                id="login-disconnect-button"
+                variant="ghost"
+                className="w-full text-muted-foreground"
                 onClick={handleDisconnect}
               >
                 <LogOut className="w-4 h-4 mr-2" />
-                Disconnect
+                Use a different wallet
               </Button>
             </div>
+
           ) : (
+            /* ── State: Not connected ─────────────────────────────────── */
             <div className="w-full space-y-4">
               <Button
+                id="login-connect-button"
                 className="w-full"
                 size="lg"
                 onClick={handleConnect}
@@ -251,7 +298,7 @@ export default function LoginPage() {
                 {isConnecting ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    {statusMessage || 'Connecting...'}
+                    Connecting…
                   </>
                 ) : (
                   'Connect Freighter'
@@ -269,6 +316,7 @@ export default function LoginPage() {
                     <div className="flex-1 h-px bg-border/40" />
                   </div>
                   <Button
+                    id="login-mock-button"
                     variant="outline"
                     className="w-full border-dashed border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 hover:border-amber-500/60"
                     onClick={handleMockLogin}

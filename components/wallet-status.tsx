@@ -57,7 +57,7 @@ export function WalletStatus() {
 
   useEffect(() => {
     const interval = setInterval(checkWalletStatus, 3000);
-    
+
     return () => clearInterval(interval);
   }, [checkWalletStatus]);
 

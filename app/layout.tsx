@@ -5,6 +5,8 @@ import { Analytics } from '@vercel/analytics/next'
 import './globals.css'
 import { ThemeProvider } from "@/components/theme-provider" 
 import { Toaster } from "@/components/ui/sonner"
+import { StellarWalletProvider } from "@/components/wallet-provider"
+import { NetworkBanner } from "@/components/network-banner"
 
 export const metadata: Metadata = {
   title: 'TaskChain',
@@ -43,9 +45,12 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          {children}
-          <Toaster expand closeButton />
-          <Analytics />
+          <StellarWalletProvider>
+            <NetworkBanner />
+            {children}
+            <Toaster expand closeButton />
+            <Analytics />
+          </StellarWalletProvider>
         </ThemeProvider>
       </body>
     </html>
