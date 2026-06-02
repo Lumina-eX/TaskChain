@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
   AlertCircle,
   Plus,
@@ -64,7 +65,6 @@ const statusConfig = {
 
 export default function DisputesPage() {
   const [showDisputeForm, setShowDisputeForm] = useState(false);
-  const [selectedDispute, setSelectedDispute] = useState<Dispute | null>(null);
 
   return (
     <div className="p-8">
@@ -187,16 +187,11 @@ export default function DisputesPage() {
 
                     {/* Action */}
                     <div className="pl-7 pt-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedDispute(dispute);
-                        }}
-                      >
-                        <MessageSquare className="mr-2 h-4 w-4" />
-                        View Details
+                      <Button asChild size="sm" variant="outline">
+                        <Link href={`/dashboard/disputes/${dispute.id}`}>
+                          <MessageSquare className="mr-2 h-4 w-4" />
+                          View Details
+                        </Link>
                       </Button>
                     </div>
                   </div>
