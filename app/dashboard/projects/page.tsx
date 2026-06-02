@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Search, Filter, ChevronRight, Loader2 } from "lucide-react";
+import { Search, Filter, ChevronRight, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -104,9 +104,17 @@ export default function ProjectsPage() {
   return (
     <div className="p-8">
       <div className="space-y-8">
-        <div>
-          <h1 className="text-3xl font-bold">All Projects</h1>
-          <p className="text-muted-foreground mt-2">View and manage all your projects</p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold">All Projects</h1>
+            <p className="text-muted-foreground mt-2">View and manage all your projects</p>
+          </div>
+          <Link href="/dashboard/projects/milestone-demo">
+            <Button className="bg-primary/20 border border-primary/40 text-primary hover:bg-primary/30 text-xs font-semibold gap-1.5 h-9 shrink-0">
+              <Sparkles className="h-4 w-4 animate-pulse" />
+              Try Milestone Sandbox
+            </Button>
+          </Link>
         </div>
 
         <div className="flex flex-col sm:flex-row gap-4">

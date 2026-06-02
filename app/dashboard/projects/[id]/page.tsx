@@ -16,6 +16,7 @@ import {
   EscrowStatusTracker,
   type EscrowStage,
 } from "@/components/dashboard/escrow-status-tracker";
+import { MilestoneProgressTracker } from "@/components/dashboard/milestone-progress-tracker";
 
 interface Milestone {
   id: string;
@@ -101,6 +102,48 @@ export default function ProjectDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [showApprovalDialog, setShowApprovalDialog] = useState(false);
   const [now] = useState(() => Date.now());
+
+  const handleMilestoneStatusUpdate = async (milestoneId: string, newStatus: string) => {
+    try {
+      const res = await fetch(`/api/milestones/${milestoneId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...getAuthHeaders(),
+        },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || "Failed to update milestone status");
+      }
+      
+      // Update local state dynamically
+      setMilestones((prev) =>
+        prev.map((m) =>
+          m.id === milestoneId
+            ? {
+                ...m,
+                status: newStatus,
+              }
+            : m
+        )
+      );
+
+      // Trigger standard API re-fetch for absolute sync
+      const resProj = await fetch(`/api/projects/${id}`, {
+        headers: getAuthHeaders(),
+      });
+      if (resProj.ok) {
+        const data = await resProj.json();
+        setProject(data.project);
+        setMilestones(data.milestones ?? []);
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Failed to update milestone status. Make sure you are authorized.");
+    }
+  };
 
   useEffect(() => {
     if (!id) return;
