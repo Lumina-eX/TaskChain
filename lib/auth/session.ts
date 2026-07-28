@@ -26,6 +26,9 @@ export interface AuthSession {
 function getJwtSecret(): string {
   const secret = process.env.JWT_SECRET
   if (!secret || secret.length < 32) {
+    if (process.env.NODE_ENV !== 'production') {
+      return 'dev_local_jwt_secret_32_chars_minimum_value'
+    }
     throw new Error('JWT_SECRET must be set and at least 32 chars long')
   }
 

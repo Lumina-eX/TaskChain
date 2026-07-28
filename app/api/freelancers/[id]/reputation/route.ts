@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { enforceRateLimit, buildRateLimitKey } from '@/lib/security/rateLimit'
 import { getFreelancerReputation, userExists } from '@/lib/reputation'
 
-type RouteContext = { params: Promise<{ userId: string }> }
+type RouteContext = { params: Promise<{ id: string }> }
 
 export async function GET(_request: NextRequest, context: RouteContext) {
   const limited = await enforceRateLimit(_request, {
@@ -14,7 +14,7 @@ export async function GET(_request: NextRequest, context: RouteContext) {
   })
   if (limited) return limited
 
-  const { userId: rawId } = await context.params
+  const { id: rawId } = await context.params
   const id = Number.parseInt(rawId, 10)
   if (!Number.isFinite(id) || id < 1) {
     return NextResponse.json({ error: 'Invalid user id', code: 'INVALID_USER_ID' }, { status: 400 })
