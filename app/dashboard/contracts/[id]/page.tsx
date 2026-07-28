@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Loader2, AlertCircle, Star, ShieldCheck, Wallet, User } from "lucide-react";
+import { ArrowLeft, Loader2, AlertCircle, Star, ShieldCheck, Wallet, User, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -146,9 +146,17 @@ export default function ContractDetailPage() {
               <p className="text-muted-foreground mt-2">Job ID: {contract.job_id}</p>
             </div>
           </div>
-          <Badge className={`${statusCfg.color} ${statusCfg.textColor} border-0`}>
-            {statusCfg.label}
-          </Badge>
+          <div className="flex items-center gap-3">
+            <Link href={`/dashboard/messages?contractId=${contract.id}`}>
+              <Button variant="outline" className="gap-2 border-primary/30 hover:bg-primary/10 text-xs sm:text-sm">
+                <MessageSquare className="h-4 w-4 text-primary" />
+                <span>Message Party</span>
+              </Button>
+            </Link>
+            <Badge className={`${statusCfg.color} ${statusCfg.textColor} border-0`}>
+              {statusCfg.label}
+            </Badge>
+          </div>
         </div>
 
         {/* Parties */}
