@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { CheckCircle2, AlertCircle } from "lucide-react";
+import { useState, useCallback, useEffect } from "react";
+import { CheckCircle2, AlertCircle, Loader2, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -13,12 +13,20 @@ import {
 } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { useStellarWallet } from "@/components/wallet-provider";
+import { signTransaction } from "@stellar/freighter-api";
+
+type TxStatus = "idle" | "building" | "requires_signing" | "submitting" | "pending" | "confirmed" | "failed";
 
 interface ApprovalDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   projectTitle: string;
   amount: number;
+  milestoneId?: string;
+  contractId?: string;
+  onSuccess?: () => void;
 }
 
 export function ApprovalDialog({
@@ -26,20 +34,113 @@ export function ApprovalDialog({
   onOpenChange,
   projectTitle,
   amount,
+  milestoneId,
+  contractId,
+  onSuccess,
 }: ApprovalDialogProps) {
   const [agreeToTerms, setAgreeToTerms] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [txStatus, setTxStatus] = useState<TxStatus>("idle");
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const { address, isConnected } = useStellarWallet();
 
-  const handleApprove = async () => {
-    if (!agreeToTerms) return;
+  useEffect(() => {
+    if (!open) {
+      const timer = setTimeout(() => {
+        setTxStatus("idle");
+        setTxHash(null);
+        setError(null);
+        setAgreeToTerms(false);
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [open]);
 
-    setIsProcessing(true);
-    // Simulate API call
-    setTimeout(() => {
-      setIsProcessing(false);
-      onOpenChange(false);
-      setAgreeToTerms(false);
-    }, 2000);
+  const handleApprove = useCallback(async () => {
+    if (!agreeToTerms || !milestoneId) return;
+
+    setError(null);
+
+    if (!isConnected || !address) {
+      setError("Please connect your Stellar wallet (Freighter) first.");
+      setTxStatus("failed");
+      return;
+    }
+
+    try {
+      setTxStatus("building");
+
+      const buildRes = await fetch(`/api/milestones/${milestoneId}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "build" }),
+      });
+
+      if (!buildRes.ok) {
+        const errBody = await buildRes.json().catch(() => ({}));
+        throw new Error(errBody.error || "Failed to build approval transaction");
+      }
+
+      const { unsignedXdr } = await buildRes.json();
+      if (!unsignedXdr) throw new Error("No transaction XDR returned from server");
+
+      setTxStatus("requires_signing");
+
+      const networkPassphrase = "Test SDF Network ; September 2015";
+
+      const signedXdr = await signTransaction(unsignedXdr, {
+        networkPassphrase,
+      });
+
+      if (!signedXdr) {
+        throw new Error("Transaction signing was cancelled.");
+      }
+
+      setTxStatus("submitting");
+
+      const submitRes = await fetch(`/api/milestones/${milestoneId}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "approve", signedXdr }),
+      });
+
+      const submitBody = await submitRes.json();
+
+      if (!submitRes.ok) {
+        throw new Error(submitBody.error || "Failed to submit approval transaction");
+      }
+
+      setTxHash(submitBody.txHash || null);
+      setTxStatus("confirmed");
+
+      onSuccess?.();
+
+      setTimeout(() => {
+        onOpenChange(false);
+      }, 2000);
+    } catch (err: any) {
+      setError(err.message || "Approval failed");
+      setTxStatus("failed");
+    }
+  }, [agreeToTerms, milestoneId, address, isConnected, onOpenChange, onSuccess]);
+
+  const statusBadge = () => {
+    switch (txStatus) {
+      case "building":
+        return <Badge variant="secondary" className="gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Building transaction</Badge>;
+      case "requires_signing":
+        return <Badge variant="outline" className="gap-1 border-amber-400 text-amber-600"><AlertCircle className="h-3 w-3" /> Sign in Freighter</Badge>;
+      case "submitting":
+        return <Badge variant="secondary" className="gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Submitting</Badge>;
+      case "pending":
+        return <Badge variant="secondary" className="gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Confirming</Badge>;
+      case "confirmed":
+        return <Badge variant="default" className="gap-1 bg-green-600"><CheckCircle2 className="h-3 w-3" /> Confirmed</Badge>;
+      case "failed":
+        return <Badge variant="destructive" className="gap-1"><AlertCircle className="h-3 w-3" /> Failed</Badge>;
+      default:
+        return null;
+    }
   };
 
   return (
@@ -56,7 +157,6 @@ export function ApprovalDialog({
         </DialogHeader>
 
         <div className="space-y-6 py-4">
-          {/* Project Details */}
           <div className="space-y-2">
             <h4 className="text-sm font-semibold text-muted-foreground">
               Project
@@ -64,7 +164,6 @@ export function ApprovalDialog({
             <p className="text-lg font-semibold">{projectTitle}</p>
           </div>
 
-          {/* Amount */}
           <div className="p-4 rounded-lg bg-accent/10 border border-accent/30">
             <p className="text-sm text-muted-foreground mb-1">Payment Amount</p>
             <p className="text-2xl font-bold text-accent">
@@ -75,7 +174,27 @@ export function ApprovalDialog({
             </p>
           </div>
 
-          {/* Confirmation */}
+          {txStatus !== "idle" && (
+            <div className="flex items-center justify-between p-3 rounded-lg bg-card/50 border border-border/40">
+              <span className="text-sm font-medium">Transaction Status</span>
+              {statusBadge()}
+            </div>
+          )}
+
+          {txHash && (
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-card/50 border border-border/40">
+              <span className="text-xs text-muted-foreground">Tx Hash:</span>
+              <code className="text-xs font-mono truncate flex-1">{txHash}</code>
+            </div>
+          )}
+
+          {error && (
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-destructive/10 border border-destructive/30">
+              <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-destructive">{error}</p>
+            </div>
+          )}
+
           <div className="space-y-3">
             <div className="flex items-start gap-3 p-3 rounded-lg bg-card/50 border border-border/40">
               <AlertCircle className="h-5 w-5 text-primary flex-shrink-0 mt-0.5" />
@@ -84,14 +203,13 @@ export function ApprovalDialog({
                   Please verify:
                 </p>
                 <ul className="space-y-1 text-xs">
-                  <li>✓ All deliverables have been completed</li>
-                  <li>✓ Quality meets your expectations</li>
-                  <li>✓ All requirements are satisfied</li>
+                  <li>All deliverables have been completed</li>
+                  <li>Quality meets your expectations</li>
+                  <li>All requirements are satisfied</li>
                 </ul>
               </div>
             </div>
 
-            {/* Agreement */}
             <div className="space-y-3 pt-2">
               <Label className="flex items-start gap-3 cursor-pointer hover:bg-card/30 p-3 rounded-lg transition-colors">
                 <Checkbox
@@ -100,6 +218,7 @@ export function ApprovalDialog({
                     setAgreeToTerms(checked === true)
                   }
                   className="mt-1"
+                  disabled={txStatus === "building" || txStatus === "submitting" || txStatus === "requires_signing"}
                 />
                 <span className="text-sm text-muted-foreground">
                   I confirm that the work is complete and satisfactory. I
@@ -115,22 +234,23 @@ export function ApprovalDialog({
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}
-            disabled={isProcessing}
+            disabled={txStatus === "building" || txStatus === "submitting" || txStatus === "requires_signing"}
           >
             Cancel
           </Button>
           <Button
             onClick={handleApprove}
-            disabled={!agreeToTerms || isProcessing}
+            disabled={!agreeToTerms || txStatus === "building" || txStatus === "submitting" || txStatus === "requires_signing" || txStatus === "confirmed"}
             className="group"
           >
-            {isProcessing ? (
-              <>Processing...</>
+            {txStatus === "building" || txStatus === "submitting" ? (
+              <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing</>
+            ) : txStatus === "requires_signing" ? (
+              <><AlertCircle className="mr-2 h-4 w-4" /> Sign in Freighter</>
+            ) : txStatus === "confirmed" ? (
+              <><CheckCircle2 className="mr-2 h-4 w-4" /> Approved</>
             ) : (
-              <>
-                <CheckCircle2 className="mr-2 h-4 w-4 group-hover:scale-110 transition-transform" />
-                Approve & Release
-              </>
+              <><CheckCircle2 className="mr-2 h-4 w-4 group-hover:scale-110 transition-transform" /> Approve & Release</>
             )}
           </Button>
         </DialogFooter>

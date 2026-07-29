@@ -12,6 +12,14 @@
  * compiled escrow WASM is available. Each function documents the real steps.
  */
 
+import {
+  SorobanRpc,
+  TransactionBuilder,
+  Contract,
+  Networks,
+  BASE_FEE,
+  xdr,
+} from '@stellar/stellar-sdk'
 import type { IEscrowBlockchainAdapter } from './types'
 import { EscrowBlockchainError } from './errors'
 
@@ -44,16 +52,31 @@ function mockTxHash(seed: string): string {
 /**
  * Production-ready Soroban adapter.
  *
- * All methods currently use stubs that return deterministic mock values so the
- * full service stack can be exercised end-to-end before the on-chain work is
- * complete. Each stub is annotated with the real implementation steps.
+ * Methods that are fully implemented use real @stellar/stellar-sdk Soroban RPC
+ * calls. Methods marked as stubs return deterministic mock values so the full
+ * service stack can be exercised end-to-end before the on-chain WASM is deployed.
  */
 export class SorobanEscrowAdapter implements IEscrowBlockchainAdapter {
   private readonly networkPassphrase: string
+  private readonly rpcUrl: string
 
   constructor() {
     this.networkPassphrase =
       process.env.STELLAR_NETWORK_PASSPHRASE ?? 'Test SDF Network ; September 2015'
+    this.rpcUrl =
+      process.env.STELLAR_RPC_URL ?? 'https://soroban-testnet.stellar.org'
+  }
+
+  /** Lazily-initialised Soroban RPC server instance. */
+  private get server(): SorobanRpc.Server {
+    return new SorobanRpc.Server(this.rpcUrl)
+  }
+
+  /** Get the Stellar network passphrase enum. */
+  private get network(): typeof Networks.TESTNET | typeof Networks.PUBLIC {
+    return this.networkPassphrase === Networks.PUBLIC
+      ? Networks.PUBLIC
+      : Networks.TESTNET
   }
 
   // -------------------------------------------------------------------------
@@ -174,6 +197,98 @@ export class SorobanEscrowAdapter implements IEscrowBlockchainAdapter {
       return { txHash: mockTxHash(seed) }
     } catch (err) {
       throw new EscrowBlockchainError('Failed to refund escrow on-chain', err)
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // buildApproveTransaction
+  // -------------------------------------------------------------------------
+
+  async buildApproveTransaction(params: {
+    contractAddress: string
+    milestoneId: string
+    clientAddress: string
+  }): Promise<{ unsignedXdr: string; networkPassphrase: string }> {
+    try {
+      const contract = new Contract(params.contractAddress)
+
+      const rawTx = await this.server.getAccount(params.clientAddress)
+
+      const tx = new TransactionBuilder(rawTx, {
+        fee: BASE_FEE,
+        networkPassphrase: this.networkPassphrase,
+      })
+        .addOperation(contract.call('approve', xdr.ScVal.scvU32(Number(params.milestoneId))))
+        .setTimeout(300)
+        .build()
+
+      const simulated = await this.server.prepareTransaction(tx)
+
+      return {
+        unsignedXdr: simulated.toXDR(),
+        networkPassphrase: this.networkPassphrase,
+      }
+    } catch (err) {
+      throw new EscrowBlockchainError(
+        `Failed to build approval transaction for milestone ${params.milestoneId}`,
+        err
+      )
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // submitApprovalTransaction
+  // -------------------------------------------------------------------------
+
+  async submitApprovalTransaction(params: {
+    signedXdr: string
+  }): Promise<{ txHash: string; status: 'pending' | 'confirmed' | 'failed' }> {
+    try {
+      const tx = TransactionBuilder.fromXDR(params.signedXdr, this.networkPassphrase as any)
+
+      const submitResult = await this.server.sendTransaction(tx)
+
+      if (submitResult.errorResult) {
+        return {
+          txHash: tx.hash().toString('hex'),
+          status: 'failed',
+        }
+      }
+
+      return {
+        txHash: submitResult.hash,
+        status: 'pending',
+      }
+    } catch (err) {
+      throw new EscrowBlockchainError('Failed to submit approval transaction', err)
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // getTransactionStatus
+  // -------------------------------------------------------------------------
+
+  async getTransactionStatus(params: {
+    txHash: string
+  }): Promise<{ status: 'pending' | 'confirmed' | 'failed'; resultMetaXdr?: string }> {
+    try {
+      const result = await this.server.getTransaction(params.txHash)
+
+      switch (result.status) {
+        case 'NOT_FOUND':
+          return { status: 'pending' }
+        case 'SUCCESS':
+          return {
+            status: 'confirmed',
+            resultMetaXdr: result.resultMetaXdr?.toXDR('base64'),
+          }
+        case 'FAILED':
+          return { status: 'failed' }
+        default:
+          return { status: 'pending' }
+      }
+    } catch {
+      return { status: 'pending' }
     }
   }
 }

@@ -20,6 +20,9 @@ import type {
   CreateEscrowResult,
   FundEscrowInput,
   FundEscrowResult,
+  BuildApproveInput,
+  SubmitApproveInput,
+  ApproveMilestoneResult,
   ReleaseFundsInput,
   ReleaseFundsResult,
   RefundEscrowInput,
@@ -243,6 +246,94 @@ export class EscrowService {
     }
 
     return result
+  }
+
+  // =========================================================================
+  // buildMilestoneApproval
+  // =========================================================================
+
+  /**
+   * Build an unsigned Soroban approval transaction for a submitted milestone.
+   * The caller (client wallet) must sign the returned XDR with Freighter and
+   * then call submitMilestoneApproval to complete the flow.
+   *
+   * Lifecycle: milestone.status: 'submitted' → 'approved'
+   *
+   * @throws EscrowContractNotFoundError   if contract does not exist
+   * @throws EscrowMilestoneNotFoundError  if milestone does not exist
+   * @throws EscrowForbiddenError          if caller is not the client
+   * @throws EscrowInvalidStateError       if milestone is not in 'submitted' state
+   */
+  async buildMilestoneApproval(input: BuildApproveInput): Promise<ApproveMilestoneResult> {
+    const contract = await this.requireContract(input.contractId)
+    const milestone = await this.requireMilestone(input.milestoneId)
+
+    await this.assertIsClient(contract, input.callerWalletAddress)
+
+    if (milestone.status !== 'submitted') {
+      throw new EscrowInvalidStateError(
+        `Cannot approve milestone: status is '${milestone.status}' (must be 'submitted')`
+      )
+    }
+    if (!contract.escrowAddress) {
+      throw new EscrowInvalidStateError('Contract has no escrow address')
+    }
+
+    const { unsignedXdr, networkPassphrase } = await this.blockchain.buildApproveTransaction({
+      contractAddress: contract.escrowAddress,
+      milestoneId: milestone.id,
+      clientAddress: input.callerWalletAddress,
+    })
+
+    return {
+      unsignedXdr,
+      txStatus: 'required',
+    }
+  }
+
+  // =========================================================================
+  // submitMilestoneApproval
+  // =========================================================================
+
+  /**
+   * Submit a client-signed Soroban approval transaction and update the
+   * milestone status once confirmed on-chain.
+   *
+   * @throws EscrowContractNotFoundError  if contract does not exist
+   * @throws EscrowMilestoneNotFoundError if milestone does not exist
+   * @throws EscrowBlockchainError        if submission to Soroban RPC fails
+   */
+  async submitMilestoneApproval(input: SubmitApproveInput): Promise<ApproveMilestoneResult> {
+    const contract = await this.requireContract(input.contractId)
+    const milestone = await this.requireMilestone(input.milestoneId)
+
+    if (milestone.status !== 'submitted' && milestone.status !== 'approved') {
+      throw new EscrowInvalidStateError(
+        `Cannot submit approval: milestone status is '${milestone.status}'`
+      )
+    }
+
+    const { txHash, status } = await this.blockchain.submitApprovalTransaction({
+      signedXdr: input.signedXdr,
+    })
+
+    if (status === 'failed') {
+      return { txHash, txStatus: 'failed' }
+    }
+
+    const now = new Date().toISOString()
+    const updatedMilestone = await this.repo.updateMilestoneStatus(
+      milestone.id,
+      'approved',
+      { approvedAt: now }
+    )
+
+    return {
+      txHash,
+      txStatus: 'confirmed',
+      milestone: updatedMilestone,
+      contract,
+    }
   }
 
   // =========================================================================

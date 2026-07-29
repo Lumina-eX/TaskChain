@@ -175,6 +175,30 @@ export interface FundEscrowResult {
   fundedAt: string
 }
 
+/** Input for approveMilestone (build step) */
+export interface BuildApproveInput {
+  contractId: string
+  milestoneId: string
+  callerWalletAddress: string
+}
+
+/** Input for approveMilestone (submit step) */
+export interface SubmitApproveInput {
+  contractId: string
+  milestoneId: string
+  signedXdr: string
+  callerWalletAddress: string
+}
+
+/** Result returned from approveMilestone */
+export interface ApproveMilestoneResult {
+  unsignedXdr?: string
+  txHash?: string
+  txStatus: 'required' | 'pending' | 'confirmed' | 'failed'
+  milestone?: EscrowMilestone
+  contract?: EscrowContract
+}
+
 /** Input for releaseFunds (per milestone) */
 export interface ReleaseFundsInput {
   contractId: string
@@ -295,6 +319,31 @@ export interface IEscrowBlockchainAdapter {
     amount: string
     currency: string
   }): Promise<{ txHash: string }>
+
+  /**
+   * Build an unsigned Soroban transaction to approve a milestone.
+   * Returns the XDR string that the client must sign with Freighter.
+   */
+  buildApproveTransaction(params: {
+    contractAddress: string
+    milestoneId: string
+    clientAddress: string
+  }): Promise<{ unsignedXdr: string; networkPassphrase: string }>
+
+  /**
+   * Submit a client-signed Soroban approval transaction to the Stellar network.
+   * Returns the transaction hash and current status.
+   */
+  submitApprovalTransaction(params: {
+    signedXdr: string
+  }): Promise<{ txHash: string; status: 'pending' | 'confirmed' | 'failed' }>
+
+  /**
+   * Check the status of a previously submitted Soroban transaction.
+   */
+  getTransactionStatus(params: {
+    txHash: string
+  }): Promise<{ status: 'pending' | 'confirmed' | 'failed'; resultMetaXdr?: string }>
 }
 
 // ---------------------------------------------------------------------------
