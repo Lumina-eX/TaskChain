@@ -12,6 +12,7 @@
  * compiled escrow WASM is available. Each function documents the real steps.
  */
 
+import { SorobanRpc, TransactionBuilder, nativeToScVal, Keypair } from '@stellar/stellar-sdk'
 import type { IEscrowBlockchainAdapter } from './types'
 import { EscrowBlockchainError } from './errors'
 
@@ -132,21 +133,76 @@ export class SorobanEscrowAdapter implements IEscrowBlockchainAdapter {
     currency: string
   }): Promise<{ txHash: string }> {
     try {
-      /**
-       * Real implementation steps:
-       *  1. Build SorobanRpc.Server + load client keypair from env/KMS.
-       *  2. Invoke the escrow contract's `release_milestone` function with
-       *     (milestoneId, recipientAddress, amount).
-       *  3. Simulate the transaction to get the footprint.
-       *  4. Sign and submit: server.sendTransaction(signedTx).
-       *  5. Poll until confirmed, then return the tx hash.
-       */
-      const seed = `release:${params.contractAddress}:${params.milestoneId}`
-      return { txHash: mockTxHash(seed) }
+      const rpcUrl =
+        process.env.STELLAR_RPC_URL ?? 'https://soroban-testnet.stellar.org'
+      const server = new SorobanRpc.Server(rpcUrl)
+
+      const adminSecret = process.env.ESCROW_ADMIN_SECRET_KEY
+      if (!adminSecret) {
+        throw new Error('ESCROW_ADMIN_SECRET_KEY is not set')
+      }
+      const adminKeypair = Keypair.fromSecret(adminSecret)
+      const adminPublicKey = adminKeypair.publicKey()
+
+      const account = await server.getAccount(adminPublicKey)
+
+      const contract = new SorobanRpc.Contract(params.contractAddress)
+      const tx = contract.call(
+        'release',
+        nativeToScVal(params.milestoneId, { type: 'symbol' }),
+        nativeToScVal(params.recipientAddress, { type: 'address' }),
+        nativeToScVal(params.amount, { type: 'i128' }),
+      )
+
+      const transaction = new TransactionBuilder(account, {
+        fee: '100',
+        networkPassphrase: this.networkPassphrase,
+      })
+        .addOperation(tx)
+        .setTimeout(30)
+        .build()
+
+      const simulated = await server.simulateTransaction(transaction)
+      if (SorobanRpc.isSimulationError(simulated)) {
+        throw new Error(
+          `Simulation failed: ${simulated.error ?? 'Unknown error'}`,
+        )
+      }
+
+      const prepared = SorobanRpc.assembleTransaction(transaction, simulated)
+      prepared.sign(adminKeypair)
+
+      const sendResponse = await server.sendTransaction(prepared)
+
+      if (sendResponse.status === 'PENDING' || sendResponse.status === 'DUPLICATE') {
+        let getTxResponse
+        const maxAttempts = 30
+
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+          getTxResponse = await server.getTransaction(sendResponse.hash)
+
+          if (getTxResponse.status === 'SUCCESS') {
+            return { txHash: sendResponse.hash }
+          }
+
+          if (getTxResponse.status === 'FAILED') {
+            throw new Error(`Transaction failed on chain for milestone ${params.milestoneId}`)
+          }
+        }
+
+        throw new Error(
+          `Transaction timed out while waiting for confirmation: ${sendResponse.hash}`,
+        )
+      }
+
+      throw new Error(
+        `Transaction submission failed: ${sendResponse.errorResult?.result?.switch()?.name ?? 'Unknown error'}`,
+      )
     } catch (err) {
       throw new EscrowBlockchainError(
         `Failed to release funds for milestone ${params.milestoneId}`,
-        err
+        err,
       )
     }
   }
