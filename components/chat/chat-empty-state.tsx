@@ -56,7 +56,7 @@ export function ChatEmptyState({ type, contractTitle, onQuickStart }: ChatEmptyS
                 onClick={() => onQuickStart(prompt)}
                 className="text-left text-xs p-3 rounded-xl bg-card/60 hover:bg-card border border-border/40 hover:border-primary/40 text-foreground/90 transition-all flex items-center justify-between group"
               >
-                <span>"{prompt}"</span>
+                <span>&quot;{prompt}&quot;</span>
                 <Send className="h-3.5 w-3.5 text-primary opacity-0 group-hover:opacity-100 transition-opacity shrink-0 ml-2" />
               </button>
             ))}
