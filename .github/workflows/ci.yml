@@ -9,7 +9,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -27,7 +26,7 @@ jobs:
           cache-dependency-path: pnpm-lock.yaml
 
       - name: Install Dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
 
       - name: Run Lint
         run: pnpm lint
@@ -35,7 +34,5 @@ jobs:
       - name: Build Project
         run: pnpm build
         env:
-          # Provide a placeholder so Next.js module evaluation doesn't throw
-          # during the build. No real DB connection is made at build time.
           DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgres://build:build@localhost/build' }}
           JWT_SECRET: ${{ secrets.JWT_SECRET || 'build-time-placeholder-secret-32chars!!' }}

@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard,
   FileText,
+  MessageSquare,
   AlertCircle,
   LogOut,
   ChevronRight,
@@ -30,6 +31,11 @@ const navItems = [
     label: 'Projects',
     href: '/dashboard/projects',
     icon: FileText,
+  },
+  {
+    label: 'Messages',
+    href: '/dashboard/messages',
+    icon: MessageSquare,
   },
   {
     label: 'Disputes',
