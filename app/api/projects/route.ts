@@ -5,7 +5,14 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { createProject, listProjects, type ProjectStatus } from "@/lib/projects";
+import {
+  createProject,
+  getAvailableProjectSkills,
+  listProjects,
+  type ProjectSortField,
+  type ProjectSortOrder,
+  type ProjectStatus,
+} from "@/lib/projects";
 
 // ─── Validation schemas ────────────────────────────────────────────────────
 
@@ -34,11 +41,19 @@ const CreateProjectSchema = z.object({
     .optional(),
 });
 
+const PROJECT_SORT_FIELDS = ["newest", "budget", "deadline"] as const;
+const PROJECT_SORT_ORDERS = ["asc", "desc"] as const;
+
 const ListProjectsSchema = z.object({
-  clientId: z.string().uuid("clientId must be a valid UUID").optional(),
-  status:   z.enum(PROJECT_STATUS).optional(),
-  limit:    z.coerce.number().int().min(1).max(100).optional(),
-  offset:   z.coerce.number().int().min(0).optional(),
+  clientId:  z.string().uuid("clientId must be a valid UUID").optional(),
+  status:    z.enum(PROJECT_STATUS).optional(),
+  minBudget: z.coerce.number().min(0).optional(),
+  maxBudget: z.coerce.number().min(0).optional(),
+  skills:    z.array(z.string().min(1).max(100)).optional(),
+  sort:      z.enum(PROJECT_SORT_FIELDS).optional(),
+  order:     z.enum(PROJECT_SORT_ORDERS).optional(),
+  limit:     z.coerce.number().int().min(1).max(100).optional(),
+  offset:    z.coerce.number().int().min(0).optional(),
 });
 
 // ─── POST /api/projects ────────────────────────────────────────────────────
@@ -80,10 +95,15 @@ export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl;
 
   const parsed = ListProjectsSchema.safeParse({
-    clientId: searchParams.get("clientId") ?? undefined,
-    status:   searchParams.get("status")   ?? undefined,
-    limit:    searchParams.get("limit")    ?? undefined,
-    offset:   searchParams.get("offset")   ?? undefined,
+    clientId:  searchParams.get("clientId")  ?? undefined,
+    status:    searchParams.get("status")    ?? undefined,
+    minBudget: searchParams.get("minBudget") ?? undefined,
+    maxBudget: searchParams.get("maxBudget") ?? undefined,
+    skills:    searchParams.getAll("skills"),
+    sort:      searchParams.get("sort")      ?? undefined,
+    order:     searchParams.get("order")     ?? undefined,
+    limit:     searchParams.get("limit")     ?? undefined,
+    offset:    searchParams.get("offset")    ?? undefined,
   });
 
   if (!parsed.success) {
@@ -94,13 +114,19 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const projects = await listProjects({
-      clientId: parsed.data.clientId,
-      status:   parsed.data.status as ProjectStatus | undefined,
-      limit:    parsed.data.limit,
-      offset:   parsed.data.offset,
+    const result = await listProjects({
+      clientId:  parsed.data.clientId,
+      status:    parsed.data.status as ProjectStatus | undefined,
+      minBudget: parsed.data.minBudget,
+      maxBudget: parsed.data.maxBudget,
+      skills:    parsed.data.skills,
+      sort:      parsed.data.sort as ProjectSortField | undefined,
+      order:     parsed.data.order as ProjectSortOrder | undefined,
+      limit:     parsed.data.limit,
+      offset:    parsed.data.offset,
     });
-    return NextResponse.json(projects);
+    const skills = await getAvailableProjectSkills();
+    return NextResponse.json({ ...result, skills });
   } catch (err) {
     console.error("[GET /api/projects]", err);
     return NextResponse.json(

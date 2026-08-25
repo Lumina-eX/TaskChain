@@ -43,11 +43,24 @@ export interface UpdateProjectInput {
   milestoneCount?: number;
 }
 
+export type ProjectSortField = "newest" | "budget" | "deadline";
+export type ProjectSortOrder = "asc" | "desc";
+
 export interface ListProjectsFilter {
   clientId?: string;
   status?: ProjectStatus;
+  minBudget?: number;
+  maxBudget?: number;
+  skills?: string[];
+  sort?: ProjectSortField;
+  order?: ProjectSortOrder;
   limit?: number;
   offset?: number;
+}
+
+export interface ListProjectsResult {
+  projects: Project[];
+  totalItems: number;
 }
 
 // ─── Row → domain mapper ───────────────────────────────────────────────────
@@ -93,53 +106,84 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
 }
 
 /**
- * Returns a paginated list of projects, optionally filtered by clientId
- * and/or status. Ordered by created_at descending (newest first).
+ * Returns a paginated list of projects, optionally filtered by clientId,
+ * status, budget range and/or required skills. Results can be sorted by
+ * newest first (default), budget or deadline, in ascending or descending
+ * order. Returns both the rows and the total number of matching projects.
  */
-export async function listProjects(filter: ListProjectsFilter = {}): Promise<Project[]> {
+export async function listProjects(
+  filter: ListProjectsFilter = {},
+): Promise<ListProjectsResult> {
   const limit  = Math.min(filter.limit  ?? 20, 100); // hard cap at 100
   const offset = filter.offset ?? 0;
 
-  // Build WHERE clauses dynamically. Neon's tagged-template approach requires
-  // all placeholders to appear in the literal at build time, so we branch
-  // into four possible queries rather than building a string.
-  let rows: Record<string, unknown>[];
+  const skills = (filter.skills ?? [])
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
 
-  if (filter.clientId && filter.status) {
-    rows = await sql`
-      SELECT * FROM projects
-      WHERE  client_id = ${filter.clientId}
-        AND  status    = ${filter.status}
-      ORDER BY created_at DESC
-      LIMIT  ${limit}
-      OFFSET ${offset}
-    ` as Record<string, unknown>[];
-  } else if (filter.clientId) {
-    rows = await sql`
-      SELECT * FROM projects
-      WHERE  client_id = ${filter.clientId}
-      ORDER BY created_at DESC
-      LIMIT  ${limit}
-      OFFSET ${offset}
-    ` as Record<string, unknown>[];
-  } else if (filter.status) {
-    rows = await sql`
-      SELECT * FROM projects
-      WHERE  status = ${filter.status}
-      ORDER BY created_at DESC
-      LIMIT  ${limit}
-      OFFSET ${offset}
-    ` as Record<string, unknown>[];
+  // Build the ORDER BY clause from a controlled set of column names.
+  const sortField = filter.sort ?? "newest";
+  const order = filter.order ?? (sortField === "newest" ? "desc" : "asc");
+  const orderSql = order === "asc" ? sql`ASC` : sql`DESC`;
+  const orderBy =
+    sortField === "budget"
+      ? sql`COALESCE(budget_max, budget_min, 0) ${orderSql}, created_at DESC`
+      : sortField === "deadline"
+        ? sql`deadline ${orderSql} NULLS LAST, created_at DESC`
+        : sql`created_at DESC`;
+
+  // Build the WHERE clause. Neon's tagged-template helper requires all
+  // placeholders to appear in the literal at build time, so we use the
+  // `0 = 0` / `1 = 1` pattern to conditionally include filters.
+  const where = sql`
+    (${filter.clientId ? sql`client_id = ${filter.clientId}` : sql`TRUE`})
+    AND (${filter.status ? sql`status = ${filter.status}` : sql`TRUE`})
+    AND (${filter.minBudget !== undefined ? sql`COALESCE(budget_max, budget_min, 0) >= ${filter.minBudget}` : sql`TRUE`})
+    AND (${filter.maxBudget !== undefined ? sql`COALESCE(budget_min, budget_max, 0) <= ${filter.maxBudget}` : sql`TRUE`})
+    AND (${skills.length > 0 ? sql`tags && ${skills}` : sql`TRUE`})
+  `;
+
+  const rows = (await sql`
+    SELECT *, COUNT(*) OVER() AS total_count
+    FROM projects
+    WHERE ${where}
+    ORDER BY ${orderBy}
+    LIMIT  ${limit}
+    OFFSET ${offset}
+  `) as Array<Record<string, unknown> & { total_count: string | number }>;
+
+  let totalItems: number;
+  if (rows.length > 0) {
+    const raw = rows[0].total_count;
+    totalItems = typeof raw === "number" ? raw : parseInt(String(raw), 10) || 0;
   } else {
-    rows = await sql`
-      SELECT * FROM projects
-      ORDER BY created_at DESC
-      LIMIT  ${limit}
-      OFFSET ${offset}
-    ` as Record<string, unknown>[];
+    const countRows = (await sql`
+      SELECT COUNT(*) AS count FROM projects WHERE ${where}
+    `) as Array<{ count: string | number }>;
+    const raw = countRows[0]?.count ?? 0;
+    totalItems = typeof raw === "number" ? raw : parseInt(String(raw), 10) || 0;
   }
 
-  return rows.map(rowToProject);
+  const projects = rows.map(({ total_count: _ignored, ...rest }) =>
+    rowToProject(rest),
+  );
+
+  return { projects, totalItems };
+}
+
+/**
+ * Returns the distinct skills currently used by any project, sorted
+ * alphabetically. Used to populate the skill filter options.
+ */
+export async function getAvailableProjectSkills(): Promise<string[]> {
+  const rows = (await sql`
+    SELECT DISTINCT skill
+    FROM projects p, unnest(COALESCE(p.tags, ARRAY[]::text[])) AS skill
+    ORDER BY skill ASC
+  `) as Array<{ skill: string }>;
+  return rows
+    .map((row) => row.skill)
+    .filter((s): s is string => typeof s === "string" && s.length > 0);
 }
 
 /**
