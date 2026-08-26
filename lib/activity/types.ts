@@ -10,6 +10,9 @@ export const activityActionTypes = [
   'escrow_refunded',
   'dispute_created',
   'dispute_resolved',
+  'dispute_evidence_uploaded',
+  'dispute_evidence_viewed',
+  'dispute_evidence_deleted',
   'contract_completed',
   'contract_cancelled',
 ] as const
