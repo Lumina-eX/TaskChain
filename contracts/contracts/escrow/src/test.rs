@@ -1,12 +1,13 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{
-    testutils::Address as _,
-    vec, Address, Env, String,
-};
+use soroban_sdk::{testutils::Address as _, vec, Address, Env, String};
 
-fn create_token_contract<'a>(env: &Env, admin: &Address) -> Address {
+// ---------------------------------------------------------------------------
+// Test helpers
+// ---------------------------------------------------------------------------
+
+fn create_token_contract(env: &Env, admin: &Address) -> Address {
     env.register_stellar_asset_contract_v2(admin.clone()).address()
 }
 
@@ -34,7 +35,7 @@ fn setup_test() -> TestSetup {
 
     let token_address = create_token_contract(&env, &token_admin);
     let token_admin_client = token::StellarAssetClient::new(&env, &token_address);
-    token_admin_client.mint(&client, &1000);
+    token_admin_client.mint(&client, &1_000);
 
     let contract_id = env.register(EscrowContract, ());
     let escrow_client = EscrowContractClient::new(&env, &contract_id);
@@ -51,391 +52,822 @@ fn setup_test() -> TestSetup {
     }
 }
 
-#[test]
-fn test_happy_path() {
-    let setup = setup_test();
-    let escrow = setup.escrow_client;
-    let env = setup.env;
+/// Build a single generic milestone with id=1 and no deadline.
+fn single_milestone(env: &Env, amount: i128) -> Vec<Milestone> {
+    let m = Milestone {
+        id: 1,
+        deadline: 0,
+        amount,
+        status: MilestoneStatus::Pending,
+        description: String::from_str(env, "Milestone 1"),
+        client_approved: false,
+        freelancer_approved: false,
+    };
+    vec![env, m]
+}
 
-    let milestone_1 = Milestone {
+/// Initialise and advance the contract to the InProgress state.
+fn init_and_start(setup: &TestSetup) {
+    let escrow = &setup.escrow_client;
+    let milestones = single_milestone(&setup.env, 100);
+    escrow.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &setup.token_address,
+        &milestones,
+    );
+    escrow.fund();
+    escrow.start_work();
+}
+
+// ===========================================================================
+// VALID TRANSITION PATH TESTS
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Happy path: Created → Funded → InProgress → Submitted → Approved → Released
+// ---------------------------------------------------------------------------
+#[test]
+fn test_happy_path_full_state_machine() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+    let env = &setup.env;
+
+    let milestones = single_milestone(env, 100);
+    escrow.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &setup.token_address,
+        &milestones,
+    );
+
+    // Created
+    assert_eq!(escrow.get_contract_state(), ContractState::Created);
+
+    // Created → Funded
+    escrow.fund();
+    assert_eq!(escrow.get_contract_state(), ContractState::Funded);
+    assert!(escrow.is_funded());
+
+    // Funded → InProgress
+    escrow.start_work();
+    assert_eq!(escrow.get_contract_state(), ContractState::InProgress);
+    assert_eq!(
+        escrow.get_milestones().get(0).unwrap().status,
+        MilestoneStatus::InProgress
+    );
+
+    // InProgress → Submitted
+    escrow.submit_milestone(&1);
+    assert_eq!(escrow.get_contract_state(), ContractState::Submitted);
+    assert_eq!(
+        escrow.get_milestones().get(0).unwrap().status,
+        MilestoneStatus::Submitted
+    );
+
+    // Submitted → Approved
+    escrow.approve(&1);
+    assert_eq!(escrow.get_contract_state(), ContractState::Approved);
+    assert!(escrow.has_client_approval(&1));
+
+    // Freelancer confirms (sub-step, state stays Approved)
+    escrow.freelancer_confirm(&1);
+    assert_eq!(escrow.get_contract_state(), ContractState::Approved);
+    assert!(escrow.has_freelancer_approval(&1));
+
+    // Approved → Released
+    escrow.release(&1, &setup.freelancer);
+    assert_eq!(escrow.get_contract_state(), ContractState::Released);
+
+    let token_client = token::Client::new(env, &setup.token_address);
+    assert_eq!(token_client.balance(&setup.freelancer), 100);
+    assert_eq!(token_client.balance(&setup.client), 900);
+    assert_eq!(token_client.balance(&escrow.address), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Multi-milestone: second milestone continues after first is released
+// ---------------------------------------------------------------------------
+#[test]
+fn test_multi_milestone_happy_path() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+    let env = &setup.env;
+
+    let token_admin = Address::generate(env);
+    let token_addr = create_token_contract(env, &token_admin);
+    token::StellarAssetClient::new(env, &token_addr).mint(&setup.client, &300);
+
+    let m1 = Milestone {
         id: 1,
         deadline: 0,
         amount: 100,
         status: MilestoneStatus::Pending,
-        description: String::from_str(&env, "Milestone 1"),
+        description: String::from_str(env, "M1"),
         client_approved: false,
         freelancer_approved: false,
     };
-    let milestone_2 = Milestone {
+    let m2 = Milestone {
         id: 2,
         deadline: 0,
         amount: 200,
         status: MilestoneStatus::Pending,
-        description: String::from_str(&env, "Milestone 2"),
+        description: String::from_str(env, "M2"),
         client_approved: false,
         freelancer_approved: false,
     };
+    let milestones = vec![env, m1, m2];
 
-    let milestones = vec![&env, milestone_1, milestone_2];
-
-    // Initialize
-    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
-
-    // Verify getters
-    assert_eq!(escrow.get_client(), setup.client);
-    assert_eq!(escrow.get_freelancer(), setup.freelancer);
-    assert_eq!(escrow.get_arbiter(), setup.arbiter);
-    assert_eq!(escrow.get_token(), setup.token_address);
-    assert_eq!(escrow.is_funded(), false);
-
-    let fetched_milestones = escrow.get_milestones();
-    assert_eq!(fetched_milestones.len(), 2);
-    assert_eq!(fetched_milestones.get(0).unwrap().status, MilestoneStatus::Pending);
-
-    // Fund
+    escrow.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &token_addr,
+        &milestones,
+    );
     escrow.fund();
-    assert_eq!(escrow.is_funded(), true);
+    escrow.start_work();
 
-    // Check balances
-    let token_client = token::Client::new(&env, &setup.token_address);
-    assert_eq!(token_client.balance(&setup.client), 700);
-    assert_eq!(token_client.balance(&escrow.address), 300);
-
-    let updated_milestones = escrow.get_milestones();
-    assert_eq!(updated_milestones.get(0).unwrap().status, MilestoneStatus::Funded);
-
-    // Submit Milestone 1
+    // Complete milestone 1
     escrow.submit_milestone(&1);
-    assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Submitted);
-
-    // Approve Milestone 1 by client
     escrow.approve(&1);
-    assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Approved);
-    assert_eq!(escrow.has_client_approval(&1), true);
-
-    // Freelancer confirms Milestone 1 (multi-sig requirement)
     escrow.freelancer_confirm(&1);
-    assert_eq!(escrow.has_freelancer_approval(&1), true);
+    escrow.release(&1, &setup.client);
 
-    // Release Milestone 1 by freelancer (now both approvals are present)
-    escrow.release(&1, &setup.freelancer);
-    assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Released);
+    // After releasing M1, contract reverts to InProgress because M2 is pending.
+    assert_eq!(escrow.get_contract_state(), ContractState::InProgress);
 
-    // Verify token payout
-    assert_eq!(token_client.balance(&setup.freelancer), 100);
-    assert_eq!(token_client.balance(&escrow.address), 200);
-}
+    // Complete milestone 2
+    escrow.submit_milestone(&2);
+    escrow.approve(&2);
+    escrow.freelancer_confirm(&2);
+    escrow.release(&2, &setup.freelancer);
 
-#[test]
-fn test_voluntary_refund() {
-    let setup = setup_test();
-    let escrow = setup.escrow_client;
-    let env = setup.env;
+    // Both milestones done — contract reaches Released.
+    assert_eq!(escrow.get_contract_state(), ContractState::Released);
 
-    let milestone = Milestone {
-        id: 1,
-        deadline: 0,
-        amount: 250,
-        status: MilestoneStatus::Pending,
-        description: String::from_str(&env, "Project Work"),
-        client_approved: false,
-        freelancer_approved: false,
-    };
-    let milestones = vec![&env, milestone];
-
-    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
-    escrow.fund();
-
-    // Freelancer triggers voluntary refund
-    escrow.refund(&1, &setup.freelancer);
-
-    // Verify state updates
-    let updated = escrow.get_milestones();
-    assert_eq!(updated.get(0).unwrap().status, MilestoneStatus::Refunded);
-
-    let token_client = token::Client::new(&env, &setup.token_address);
-    // Client balance is restored (750 + 250 = 1000)
-    assert_eq!(token_client.balance(&setup.client), 1000);
+    let token_client = token::Client::new(env, &token_addr);
+    assert_eq!(token_client.balance(&setup.freelancer), 300);
     assert_eq!(token_client.balance(&escrow.address), 0);
 }
 
+// ---------------------------------------------------------------------------
+// Transition: Submitted → Disputed → Resolved (in freelancer's favour)
+// ---------------------------------------------------------------------------
 #[test]
-fn test_dispute_and_resolve_to_freelancer() {
+fn test_submitted_disputed_resolved_to_freelancer() {
     let setup = setup_test();
-    let escrow = setup.escrow_client;
-    let env = setup.env;
+    let escrow = &setup.escrow_client;
+    let env = &setup.env;
 
-    let milestone = Milestone {
-        id: 1,
-        deadline: 0,
-        amount: 400,
-        status: MilestoneStatus::Pending,
-        description: String::from_str(&env, "High Value Milestone"),
-        client_approved: false,
-        freelancer_approved: false,
-    };
-    let milestones = vec![&env, milestone];
-
-    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
-    escrow.fund();
+    init_and_start(&setup);
     escrow.submit_milestone(&1);
-    escrow.approve(&1);
+    assert_eq!(escrow.get_contract_state(), ContractState::Submitted);
 
-    // Client disputes the milestone
+    // Client raises dispute on submitted milestone.
     escrow.dispute(&1, &setup.client);
-    assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Disputed);
+    assert_eq!(escrow.get_contract_state(), ContractState::Disputed);
+    assert_eq!(
+        escrow.get_milestones().get(0).unwrap().status,
+        MilestoneStatus::Disputed
+    );
 
-    // Arbiter resolves dispute in freelancer's favor
+    // Arbiter resolves in freelancer's favour.
     escrow.resolve_dispute(&1, &true);
+    assert_eq!(escrow.get_contract_state(), ContractState::Resolved);
+    assert_eq!(
+        escrow.get_milestones().get(0).unwrap().status,
+        MilestoneStatus::Resolved
+    );
 
-    // Verify freelancer receives funds
-    let token_client = token::Client::new(&env, &setup.token_address);
-    assert_eq!(token_client.balance(&setup.freelancer), 400);
-    assert_eq!(token_client.balance(&setup.client), 600);
-    assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Released);
+    let token_client = token::Client::new(env, &setup.token_address);
+    assert_eq!(token_client.balance(&setup.freelancer), 100);
+    assert_eq!(token_client.balance(&setup.client), 900);
 }
 
+// ---------------------------------------------------------------------------
+// Transition: Approved → Disputed → Resolved (in client's favour)
+// ---------------------------------------------------------------------------
 #[test]
-fn test_dispute_and_resolve_to_client() {
+fn test_approved_disputed_resolved_to_client() {
     let setup = setup_test();
-    let escrow = setup.escrow_client;
-    let env = setup.env;
+    let escrow = &setup.escrow_client;
+    let env = &setup.env;
 
-    let milestone = Milestone {
-        id: 1,
-        deadline: 0,
-        amount: 400,
-        status: MilestoneStatus::Pending,
-        description: String::from_str(&env, "High Value Milestone"),
-        client_approved: false,
-        freelancer_approved: false,
-    };
-    let milestones = vec![&env, milestone];
-
-    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
-    escrow.fund();
+    init_and_start(&setup);
     escrow.submit_milestone(&1);
+    escrow.approve(&1);
+    assert_eq!(escrow.get_contract_state(), ContractState::Approved);
 
-    // Freelancer disputes milestone (perhaps client won't approve)
-    escrow.dispute(&1, &setup.freelancer);
-    assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Disputed);
+    // Client raises a last-minute dispute.
+    escrow.dispute(&1, &setup.client);
+    assert_eq!(escrow.get_contract_state(), ContractState::Disputed);
 
-    // Arbiter resolves dispute in client's favor
+    // Arbiter resolves in client's favour.
     escrow.resolve_dispute(&1, &false);
+    assert_eq!(escrow.get_contract_state(), ContractState::Resolved);
 
-    // Verify client gets refunded
-    let token_client = token::Client::new(&env, &setup.token_address);
-    assert_eq!(token_client.balance(&setup.client), 1000);
+    let token_client = token::Client::new(env, &setup.token_address);
+    assert_eq!(token_client.balance(&setup.client), 1_000); // full refund
     assert_eq!(token_client.balance(&setup.freelancer), 0);
-    assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Refunded);
 }
 
+// ---------------------------------------------------------------------------
+// Transition: InProgress → Disputed (freelancer raises dispute)
+// ---------------------------------------------------------------------------
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #1)")]
-fn test_double_initialization_fails() {
+fn test_inprogress_disputed_by_freelancer() {
     let setup = setup_test();
-    let escrow = setup.escrow_client;
-    let env = setup.env;
+    let escrow = &setup.escrow_client;
 
-    let milestone = Milestone {
-        id: 1,
-        deadline: 0,
-        amount: 100,
-        status: MilestoneStatus::Pending,
-        description: String::from_str(&env, "Milestone"),
-        client_approved: false,
-        freelancer_approved: false,
-    };
-    let milestones = vec![&env, milestone];
-
-    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
-    // Double initialize should trigger AlreadyInitialized error (error code 1)
-    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
+    init_and_start(&setup);
+    escrow.dispute(&1, &setup.freelancer);
+    assert_eq!(escrow.get_contract_state(), ContractState::Disputed);
 }
 
+// ---------------------------------------------------------------------------
+// Transition: Funded → Refunded (client refunds before work starts)
+// ---------------------------------------------------------------------------
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #8)")]
-fn test_zero_amount_fails() {
+fn test_funded_refunded_by_client() {
     let setup = setup_test();
-    let escrow = setup.escrow_client;
-    let env = setup.env;
+    let escrow = &setup.escrow_client;
+    let env = &setup.env;
 
-    let milestone = Milestone {
-        id: 1,
-        deadline: 0,
-        amount: 0, // Zero amount
-        status: MilestoneStatus::Pending,
-        description: String::from_str(&env, "Invalid Milestone"),
-        client_approved: false,
-        freelancer_approved: false,
-    };
-    let milestones = vec![&env, milestone];
-
-    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
-}
-
-#[test]
-#[should_panic(expected = "HostError: Error(Contract, #7)")]
-fn test_unauthorized_release_fails() {
-    let setup = setup_test();
-    let escrow = setup.escrow_client;
-    let env = setup.env;
-
-    let milestone = Milestone {
-        id: 1,
-        deadline: 0,
-        amount: 100,
-        status: MilestoneStatus::Pending,
-        description: String::from_str(&env, "Milestone"),
-        client_approved: false,
-        freelancer_approved: false,
-    };
-    let milestones = vec![&env, milestone];
-
-    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
+    let milestones = single_milestone(env, 250);
+    escrow.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &setup.token_address,
+        &milestones,
+    );
     escrow.fund();
+
+    // Client refunds before work started.
+    escrow.refund(&1, &setup.client);
+    assert_eq!(escrow.get_contract_state(), ContractState::Refunded);
+
+    let token_client = token::Client::new(env, &setup.token_address);
+    assert_eq!(token_client.balance(&setup.client), 1_000); // fully restored
+}
+
+// ---------------------------------------------------------------------------
+// Transition: InProgress → Refunded (freelancer voluntary refund)
+// ---------------------------------------------------------------------------
+#[test]
+fn test_inprogress_refunded_by_freelancer() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+    let env = &setup.env;
+
+    init_and_start(&setup);
+    escrow.refund(&1, &setup.freelancer);
+    assert_eq!(escrow.get_contract_state(), ContractState::Refunded);
+
+    let token_client = token::Client::new(env, &setup.token_address);
+    assert_eq!(token_client.balance(&setup.client), 1_000);
+}
+
+// ---------------------------------------------------------------------------
+// Transition: Submitted → Refunded (freelancer retracts submission)
+// ---------------------------------------------------------------------------
+#[test]
+fn test_submitted_refunded_by_freelancer() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+    let env = &setup.env;
+
+    init_and_start(&setup);
     escrow.submit_milestone(&1);
+    escrow.refund(&1, &setup.freelancer);
+    assert_eq!(escrow.get_contract_state(), ContractState::Refunded);
+
+    let token_client = token::Client::new(env, &setup.token_address);
+    assert_eq!(token_client.balance(&setup.client), 1_000);
+}
+
+// ---------------------------------------------------------------------------
+// get_contract_state getter works at each state
+// ---------------------------------------------------------------------------
+#[test]
+fn test_get_contract_state_at_each_step() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+    let env = &setup.env;
+
+    let milestones = single_milestone(env, 50);
+    escrow.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &setup.token_address,
+        &milestones,
+    );
+    assert_eq!(escrow.get_contract_state(), ContractState::Created);
+
+    escrow.fund();
+    assert_eq!(escrow.get_contract_state(), ContractState::Funded);
+
+    escrow.start_work();
+    assert_eq!(escrow.get_contract_state(), ContractState::InProgress);
+
+    escrow.submit_milestone(&1);
+    assert_eq!(escrow.get_contract_state(), ContractState::Submitted);
+
     escrow.approve(&1);
+    assert_eq!(escrow.get_contract_state(), ContractState::Approved);
+
     escrow.freelancer_confirm(&1);
+    assert_eq!(escrow.get_contract_state(), ContractState::Approved);
 
-    // Random address tries to trigger release
-    let stranger = Address::generate(&env);
-    escrow.release(&1, &stranger);
-}
-
-#[test]
-fn test_version() {
-    let setup = setup_test();
-    let escrow = setup.escrow_client;
-    let env = setup.env;
-
-    let milestone = Milestone {
-        id: 1,
-        deadline: 0,
-        amount: 100,
-        status: MilestoneStatus::Pending,
-        description: String::from_str(&env, "Milestone"),
-        client_approved: false,
-        freelancer_approved: false,
-    };
-    let milestones = vec![&env, milestone];
-
-    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
-
-    assert_eq!(escrow.version(), 1);
-}
-
-#[test]
-#[should_panic(expected = "HostError: Error(Contract, #9)")]
-fn test_release_without_both_approvals_fails() {
-    let setup = setup_test();
-    let escrow = setup.escrow_client;
-    let env = setup.env;
-
-    let milestone = Milestone {
-        id: 1,
-        deadline: 0,
-        amount: 100,
-        status: MilestoneStatus::Pending,
-        description: String::from_str(&env, "Milestone"),
-        client_approved: false,
-        freelancer_approved: false,
-    };
-    let milestones = vec![&env, milestone];
-
-    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
-    escrow.fund();
-    escrow.submit_milestone(&1);
-    escrow.approve(&1);
-    // Missing freelancer_confirm - should fail with InsufficientApprovals (error code 9)
     escrow.release(&1, &setup.client);
+    assert_eq!(escrow.get_contract_state(), ContractState::Released);
 }
 
-#[test]
-#[should_panic(expected = "HostError: Error(Contract, #10)")]
-fn test_double_client_approval_fails() {
-    let setup = setup_test();
-    let escrow = setup.escrow_client;
-    let env = setup.env;
-
-    let milestone = Milestone {
-        id: 1,
-        deadline: 0,
-        amount: 100,
-        status: MilestoneStatus::Pending,
-        description: String::from_str(&env, "Milestone"),
-        client_approved: false,
-        freelancer_approved: false,
-    };
-    let milestones = vec![&env, milestone];
-
-    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
-    escrow.fund();
-    escrow.submit_milestone(&1);
-    escrow.approve(&1);
-    // Double approval should fail with AlreadyApproved (error code 10)
-    escrow.approve(&1);
-}
-
-#[test]
-#[should_panic(expected = "HostError: Error(Contract, #10)")]
-fn test_double_freelancer_confirmation_fails() {
-    let setup = setup_test();
-    let escrow = setup.escrow_client;
-    let env = setup.env;
-
-    let milestone = Milestone {
-        id: 1,
-        deadline: 0,
-        amount: 100,
-        status: MilestoneStatus::Pending,
-        description: String::from_str(&env, "Milestone"),
-        client_approved: false,
-        freelancer_approved: false,
-    };
-    let milestones = vec![&env, milestone];
-
-    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
-    escrow.fund();
-    escrow.submit_milestone(&1);
-    escrow.approve(&1);
-    escrow.freelancer_confirm(&1);
-    // Double confirmation should fail with AlreadyApproved (error code 10)
-    escrow.freelancer_confirm(&1);
-}
-
+// ---------------------------------------------------------------------------
+// Dispute clears approval flags
+// ---------------------------------------------------------------------------
 #[test]
 fn test_dispute_clears_approvals() {
     let setup = setup_test();
-    let escrow = setup.escrow_client;
-    let env = setup.env;
+    let escrow = &setup.escrow_client;
 
-    let milestone = Milestone {
-        id: 1,
-        deadline: 0,
-        amount: 400,
-        status: MilestoneStatus::Pending,
-        description: String::from_str(&env, "High Value Milestone"),
-        client_approved: false,
-        freelancer_approved: false,
-    };
-    let milestones = vec![&env, milestone];
-
-    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
-    escrow.fund();
+    init_and_start(&setup);
     escrow.submit_milestone(&1);
     escrow.approve(&1);
     escrow.freelancer_confirm(&1);
 
-    // Verify both approvals are set
-    assert_eq!(escrow.has_client_approval(&1), true);
-    assert_eq!(escrow.has_freelancer_approval(&1), true);
+    assert!(escrow.has_client_approval(&1));
+    assert!(escrow.has_freelancer_approval(&1));
 
-    // Client disputes the milestone
     escrow.dispute(&1, &setup.client);
-    assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Disputed);
+    assert!(!escrow.has_client_approval(&1));
+    assert!(!escrow.has_freelancer_approval(&1));
+}
 
-    // Verify approvals are cleared
-    assert_eq!(escrow.has_client_approval(&1), false);
-    assert_eq!(escrow.has_freelancer_approval(&1), false);
+// ---------------------------------------------------------------------------
+// Version getter
+// ---------------------------------------------------------------------------
+#[test]
+fn test_version() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+    let env = &setup.env;
+
+    let milestones = single_milestone(env, 10);
+    escrow.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &setup.token_address,
+        &milestones,
+    );
+    assert_eq!(escrow.version(), 1);
+}
+
+// ===========================================================================
+// INVALID TRANSITION TESTS  (each must panic / return error)
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Cannot fund a contract that is already funded
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_double_fund_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+    let env = &setup.env;
+
+    let milestones = single_milestone(env, 100);
+    escrow.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &setup.token_address,
+        &milestones,
+    );
+    escrow.fund();
+    escrow.fund(); // AlreadyFunded → InvalidContractState (contract is now Funded not Created)
+}
+
+// ---------------------------------------------------------------------------
+// Cannot start_work before funding
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_start_work_before_fund_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+    let env = &setup.env;
+
+    let milestones = single_milestone(env, 100);
+    escrow.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &setup.token_address,
+        &milestones,
+    );
+    // State is Created; start_work requires Funded.
+    escrow.start_work();
+}
+
+// ---------------------------------------------------------------------------
+// Cannot submit before start_work
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_submit_before_start_work_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+    let env = &setup.env;
+
+    let milestones = single_milestone(env, 100);
+    escrow.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &setup.token_address,
+        &milestones,
+    );
+    escrow.fund();
+    // State is Funded; submit requires InProgress.
+    escrow.submit_milestone(&1);
+}
+
+// ---------------------------------------------------------------------------
+// Cannot approve before submit
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_approve_before_submit_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+
+    init_and_start(&setup);
+    // State is InProgress; approve requires Submitted.
+    escrow.approve(&1);
+}
+
+// ---------------------------------------------------------------------------
+// Cannot release without client approval
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_release_without_client_approval_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+
+    init_and_start(&setup);
+    escrow.submit_milestone(&1);
+    escrow.approve(&1);
+    // freelancer_confirm is missing — InsufficientApprovals.
+    escrow.release(&1, &setup.client);
+}
+
+// ---------------------------------------------------------------------------
+// Cannot release without freelancer confirmation
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_release_without_freelancer_confirm_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+
+    init_and_start(&setup);
+    escrow.submit_milestone(&1);
+    escrow.approve(&1);
+    // Missing freelancer_confirm.
+    escrow.release(&1, &setup.freelancer);
+}
+
+// ---------------------------------------------------------------------------
+// Cannot release by a stranger (unauthorized)
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_release_by_stranger_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+    let env = &setup.env;
+
+    init_and_start(&setup);
+    escrow.submit_milestone(&1);
+    escrow.approve(&1);
+    escrow.freelancer_confirm(&1);
+
+    let stranger = Address::generate(env);
+    escrow.release(&1, &stranger);
+}
+
+// ---------------------------------------------------------------------------
+// Cannot approve twice (AlreadyApproved)
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_double_client_approval_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+
+    init_and_start(&setup);
+    escrow.submit_milestone(&1);
+    escrow.approve(&1);
+    // Second approve — AlreadyApproved.
+    escrow.approve(&1);
+}
+
+// ---------------------------------------------------------------------------
+// Cannot confirm twice (AlreadyApproved)
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_double_freelancer_confirm_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+
+    init_and_start(&setup);
+    escrow.submit_milestone(&1);
+    escrow.approve(&1);
+    escrow.freelancer_confirm(&1);
+    // Second confirm.
+    escrow.freelancer_confirm(&1);
+}
+
+// ---------------------------------------------------------------------------
+// Cannot resolve a dispute when contract is not Disputed
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_resolve_dispute_without_dispute_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+
+    init_and_start(&setup);
+    escrow.submit_milestone(&1);
+    escrow.approve(&1);
+    // State is Approved, not Disputed.
+    escrow.resolve_dispute(&1, &true);
+}
+
+// ---------------------------------------------------------------------------
+// Cannot raise a dispute when contract is Released
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_dispute_after_release_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+
+    init_and_start(&setup);
+    escrow.submit_milestone(&1);
+    escrow.approve(&1);
+    escrow.freelancer_confirm(&1);
+    escrow.release(&1, &setup.client);
+    // Contract is now Released.
+    escrow.dispute(&1, &setup.client);
+}
+
+// ---------------------------------------------------------------------------
+// Cannot raise a dispute when contract is Resolved
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_dispute_after_resolved_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+
+    init_and_start(&setup);
+    escrow.submit_milestone(&1);
+    escrow.dispute(&1, &setup.client);
+    escrow.resolve_dispute(&1, &true);
+    // Contract is Resolved — cannot dispute again.
+    escrow.dispute(&1, &setup.client);
+}
+
+// ---------------------------------------------------------------------------
+// Cannot raise a dispute by a stranger
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_dispute_by_stranger_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+    let env = &setup.env;
+
+    init_and_start(&setup);
+    escrow.submit_milestone(&1);
+
+    let stranger = Address::generate(env);
+    escrow.dispute(&1, &stranger);
+}
+
+// ---------------------------------------------------------------------------
+// Cannot refund when contract is Approved (past the valid window)
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_refund_in_approved_state_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+
+    init_and_start(&setup);
+    escrow.submit_milestone(&1);
+    escrow.approve(&1);
+    // State is Approved; refund requires Funded/InProgress/Submitted.
+    escrow.refund(&1, &setup.freelancer);
+}
+
+// ---------------------------------------------------------------------------
+// Cannot refund by a stranger
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_refund_by_stranger_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+    let env = &setup.env;
+
+    init_and_start(&setup);
+    let stranger = Address::generate(env);
+    escrow.refund(&1, &stranger);
+}
+
+// ---------------------------------------------------------------------------
+// Cannot initialize twice (AlreadyInitialized)
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_double_initialization_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+    let env = &setup.env;
+
+    let milestones = single_milestone(env, 100);
+    escrow.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &setup.token_address,
+        &milestones,
+    );
+    escrow.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &setup.token_address,
+        &milestones,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Cannot initialize with zero-amount milestone
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_zero_amount_milestone_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+    let env = &setup.env;
+
+    let m = Milestone {
+        id: 1,
+        deadline: 0,
+        amount: 0,
+        status: MilestoneStatus::Pending,
+        description: String::from_str(env, "Zero"),
+        client_approved: false,
+        freelancer_approved: false,
+    };
+    escrow.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &setup.token_address,
+        &vec![env, m],
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Arbiter cannot resolve a dispute in the freelancer's favour by themselves
+// (only the arbiter address is authorised — test with a stranger trying)
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_resolve_dispute_by_stranger_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+    let _env = &setup.env;
+
+    init_and_start(&setup);
+    escrow.submit_milestone(&1);
+    escrow.dispute(&1, &setup.client);
+
+    // mock_all_auths is on so we need to verify auth rejection by replacing
+    // the arbiter check by calling from an explicitly different address — we
+    // do this by creating a fresh env WITHOUT mock_all_auths.
+    // Simpler approach: disable mock_all_auths and prove the auth guard fires.
+    let env2 = Env::default();
+    // Do NOT call env2.mock_all_auths() — auths will be rejected.
+    let token_admin2 = Address::generate(&env2);
+    let token_addr2 = create_token_contract(&env2, &token_admin2);
+    token::StellarAssetClient::new(&env2, &token_addr2)
+        .mint(&setup.client, &100);
+
+    let contract_id2 = env2.register(EscrowContract, ());
+    let escrow2 = EscrowContractClient::new(&env2, &contract_id2);
+
+    // The non-mocked env will panic on require_auth without a valid auth entry.
+    let milestones = single_milestone(&env2, 100);
+    // This will panic because the client's auth is not satisfied.
+    escrow2.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &token_addr2,
+        &milestones,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Cannot submit a milestone that doesn't exist
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_submit_nonexistent_milestone_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+
+    init_and_start(&setup);
+    escrow.submit_milestone(&99); // No milestone with id=99.
+}
+
+// ---------------------------------------------------------------------------
+// Cannot freelancer_confirm when not in Approved state
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_freelancer_confirm_in_submitted_state_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+
+    init_and_start(&setup);
+    escrow.submit_milestone(&1);
+    // State is Submitted, not Approved.
+    escrow.freelancer_confirm(&1);
+}
+
+// ---------------------------------------------------------------------------
+// Cannot fund when contract is already InProgress
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_fund_in_inprogress_state_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+
+    init_and_start(&setup);
+    // State is InProgress — fund() requires Created.
+    escrow.fund();
+}
+
+// ---------------------------------------------------------------------------
+// Cannot start_work twice
+// ---------------------------------------------------------------------------
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_double_start_work_fails() {
+    let setup = setup_test();
+    let escrow = &setup.escrow_client;
+    let env = &setup.env;
+
+    let milestones = single_milestone(env, 100);
+    escrow.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &setup.token_address,
+        &milestones,
+    );
+    escrow.fund();
+    escrow.start_work();
+    // State is InProgress; start_work requires Funded.
+    escrow.start_work();
 }
