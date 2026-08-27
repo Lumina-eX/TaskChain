@@ -38,12 +38,31 @@ export const POST = withRbac('milestone:submit', async (request: NextRequest, au
 
     const [updated] = await sql`
       UPDATE milestones SET
-        status       = 'submitted',
-        submitted_at = NOW(),
-        deliverables = COALESCE(${deliverables ? JSON.stringify(deliverables) : null}, deliverables),
-        updated_at   = NOW()
+        status              = 'submitted',
+        submitted_at        = NOW(),
+        deliverables        = COALESCE(${deliverables ? JSON.stringify(deliverables) : null}, deliverables),
+        submission_notes    = ${body.submission_notes || null},
+        revision_requested  = FALSE,
+        updated_at          = NOW()
       WHERE id = ${id}
       RETURNING *
+    `
+
+    // Record submission in history
+    await sql`
+      INSERT INTO milestone_submission_history (
+        milestone_id,
+        submission_type,
+        submitted_by,
+        deliverable_notes,
+        deliverable_links
+      ) VALUES (
+        ${id},
+        'submitted',
+        ${auth.userId},
+        ${body.submission_notes || null},
+        ${body.deliverable_links ? JSON.stringify(body.deliverable_links) : null}
+      )
     `
 
     await dispatchNotification(milestone.client_id, 'milestone_submitted', {

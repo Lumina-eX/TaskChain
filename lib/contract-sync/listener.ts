@@ -1,4 +1,8 @@
 import Server from '@stellar/stellar-sdk'
+import {
+  CANONICAL_SOROBAN_EVENTS,
+  normalizeSorobanEvent,
+} from './types'
 import type { SorobanContractEvent, SorobanEventPayload } from './types'
 
 export type EventCallback = (payload: SorobanEventPayload) => void | Promise<void>
@@ -30,13 +34,10 @@ export class SorobanEventListener {
   private callback: EventCallback | null = null
   private readonly onCheckpoint: CheckpointCallback | null
   private timer: ReturnType<typeof setInterval> | null = null
-  private lastLedger: number = 0
+  private lastLedger = 0
   private running = false
 
-  private readonly EVENT_NAMES: SorobanContractEvent[] = [
-    'init', 'fund', 'submit', 'approve', 'confirm',
-    'release', 'refund', 'dispute', 'resolve', 'expire',
-  ]
+  private readonly EVENT_NAMES = CANONICAL_SOROBAN_EVENTS
 
   constructor(options: SorobanListenerOptions) {
     this.server = new Server(options.rpcUrl)
@@ -54,11 +55,6 @@ export class SorobanEventListener {
     this.callback = cb
   }
 
-  /**
-   * Seeds the resume point before `start()` is called (e.g. from a
-   * checkpoint persisted by a previous run). No-op once the listener is
-   * already running.
-   */
   setInitialLedger(ledgerSequence: number): void {
     if (!this.running && ledgerSequence > 0) {
       this.lastLedger = ledgerSequence
@@ -69,14 +65,11 @@ export class SorobanEventListener {
     if (this.running) return
     this.running = true
 
-    // Only fall back to "start from now" when we have no persisted checkpoint
-    // to resume from — resuming from a checkpoint means events emitted while
-    // the listener was offline still get picked up on the first poll.
     if (this.lastLedger === 0) {
       try {
         const info = await this.server.getLatestLedger()
         this.lastLedger = info.sequence
-      } catch (err) {
+      } catch {
         console.warn('[SorobanListener] Could not get latest ledger, starting from 0')
       }
     }
@@ -136,23 +129,13 @@ export class SorobanEventListener {
     try {
       const events = await this.server.getEvents({
         startLedger: startSeq,
-        filters: [
-          {
-            type: 'contract',
-            contractIds: [contractAddress],
-          },
-        ],
-        pagination: {
-          limit: 100,
-        },
+        filters: [{ type: 'contract', contractIds: [contractAddress] }],
+        pagination: { limit: 100 },
       })
 
       for (const event of events.events) {
         const parsed = this.parseSorobanEvent(event, contractAddress)
         if (parsed) {
-          // Awaited so the checkpoint only advances once the event is
-          // durably enqueued/logged — otherwise a crash between "advance
-          // checkpoint" and "persist event" would permanently drop it.
           await this.callback!(parsed)
         }
       }
@@ -171,40 +154,33 @@ export class SorobanEventListener {
       if (!topic || topic.length === 0) return null
 
       const eventName = this.decodeEventName(topic[0])
-      if (!eventName || !this.EVENT_NAMES.includes(eventName as SorobanContractEvent)) {
-        return null
-      }
+      if (!eventName || !this.EVENT_NAMES.includes(eventName)) return null
 
       const rawData = event.value ?? event.data ?? []
       const data = Array.isArray(rawData) ? rawData : [rawData]
-
-      let milestoneId: number | undefined
-      let amount: string | undefined
-
-      if (eventName === 'fund') {
-        amount = this.extractAmount(data)
-      } else if (['submit', 'approve', 'confirm'].includes(eventName)) {
-        milestoneId = this.extractMilestoneId(data)
-      } else if (['release', 'refund', 'expire'].includes(eventName)) {
-        milestoneId = this.extractMilestoneId(data)
-        amount = this.extractAmount(data, 1)
-      } else if (eventName === 'dispute' || eventName === 'resolve') {
-        milestoneId = this.extractMilestoneId(data)
-      } else if (eventName === 'init') {
-        milestoneId = undefined
-      }
+      const legacy = this.isLegacyTopic(topic[0])
+      const milestoneId = this.extractMilestoneId(eventName, topic, data, legacy)
+      const disputeId = this.extractDisputeId(eventName, topic, data, legacy)
+      const amount = this.extractEventField(eventName, data, 'amount', legacy)
+      const actor = this.extractActor(eventName, topic, data, legacy)
+      const recipient = this.extractEventField(eventName, data, 'recipient', legacy)
+      const support = this.extractBooleanField(data, 'support')
+      const releaseToFreelancer = this.extractBooleanField(data, 'release_to_freelancer')
 
       return {
         event: eventName as SorobanContractEvent,
         contractAddress,
         ledgerSequence: event.ledger ?? event.ledgerSequence ?? 0,
-        timestamp: event.ledgerClosedAt
-          ? new Date(event.ledgerClosedAt).getTime()
-          : Date.now(),
+        timestamp: event.ledgerClosedAt ? new Date(event.ledgerClosedAt).getTime() : Date.now(),
         txHash: event.txHash ?? event.id ?? 'unknown',
         data,
         milestoneId,
+        disputeId,
         amount,
+        actor,
+        recipient,
+        support,
+        releaseToFreelancer,
       }
     } catch (err) {
       console.error('[SorobanListener] Failed to parse event:', err)
@@ -212,29 +188,94 @@ export class SorobanEventListener {
     }
   }
 
-  private decodeEventName(topicPart: any): string | null {
-    if (typeof topicPart === 'string') return topicPart.toLowerCase()
-    if (typeof topicPart === 'object' && topicPart !== null) {
-      if (topicPart.symbol) return topicPart.symbol.toLowerCase()
-      if (topicPart.toString) return topicPart.toString().toLowerCase()
+  private decodeEventName(topicPart: any): ReturnType<typeof normalizeSorobanEvent> {
+    if (typeof topicPart === 'string') return normalizeSorobanEvent(topicPart)
+    if (topicPart && typeof topicPart === 'object') {
+      if (typeof topicPart.symbol === 'string') return normalizeSorobanEvent(topicPart.symbol)
+      if (typeof topicPart.toString === 'function') return normalizeSorobanEvent(topicPart.toString())
     }
     return null
   }
 
-  private extractMilestoneId(data: any[], index = 0): number | undefined {
-    const val = data[index]
-    if (typeof val === 'number') return val
-    if (typeof val === 'string') return parseInt(val, 10)
-    if (val?.toNumber) return val.toNumber()
-    if (val?.toString) return parseInt(val.toString(), 10)
+  private isLegacyTopic(topicPart: any): boolean {
+    if (typeof topicPart !== 'string') return false
+    return ['init', 'fund', 'submit', 'approve', 'confirm', 'release', 'refund', 'dispute', 'resolve', 'expire']
+      .includes(topicPart.toLowerCase())
+  }
+
+  private extractMilestoneId(
+    eventName: string,
+    topic: any[],
+    data: any[],
+    legacy: boolean
+  ): number | undefined {
+    if (['milestone_submitted', 'milestone_approved', 'milestone_confirmed', 'payment_released', 'dispute_raised', 'refund_issued', 'dispute_resolved', 'milestone_expired', 'dispute_created', 'vote_cast', 'stake_claimed'].includes(eventName)) {
+      return this.extractNumber(topic[legacy ? 1 : 2]) ?? this.extractNumber(data[0])
+    }
     return undefined
   }
 
-  private extractAmount(data: any[], index = 0): string | undefined {
-    const val = data[index]
-    if (typeof val === 'string') return val
-    if (typeof val === 'number') return String(val)
-    if (val?.toString) return val.toString()
+  private extractDisputeId(
+    eventName: string,
+    topic: any[],
+    data: any[],
+    legacy: boolean
+  ): number | undefined {
+    if (!['dispute_created', 'vote_cast', 'stake_claimed'].includes(eventName)) return undefined
+    return this.extractNumber(topic[legacy ? 1 : 2]) ?? this.extractNumber(data[0])
+  }
+
+  private extractActor(eventName: string, topic: any[], data: any[], legacy: boolean): string | undefined {
+    if (legacy) return undefined
+    return this.extractString(topic[3] ?? topic[2]) ?? this.extractEventField(eventName, data, 'actor', false)
+  }
+
+  private extractEventField(
+    eventName: string,
+    data: any[],
+    field: string,
+    legacy: boolean
+  ): string | undefined {
+    if (legacy) {
+      if (field === 'amount' && ['escrow_funded'].includes(eventName)) return this.extractString(data[0])
+      if (field === 'amount' && ['payment_released', 'refund_issued', 'milestone_expired'].includes(eventName)) return this.extractString(data[1])
+      return undefined
+    }
+
+    const value = data[0]
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return this.extractString(value[field] ?? value[this.toCamelCase(field)])
+    }
+    if (field === 'amount') return this.extractString(data[0])
     return undefined
+  }
+
+  private extractBooleanField(data: any[], field: string): boolean | undefined {
+    const value = data[0]
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+    const result = value[field] ?? value[this.toCamelCase(field)]
+    return typeof result === 'boolean' ? result : undefined
+  }
+
+  private extractNumber(value: any): number | undefined {
+    if (typeof value === 'number') return value
+    if (typeof value === 'string' && /^-?\d+$/.test(value)) return Number(value)
+    if (value?.toNumber) return value.toNumber()
+    if (value?.toString) {
+      const parsed = Number(value.toString())
+      return Number.isFinite(parsed) ? parsed : undefined
+    }
+    return undefined
+  }
+
+  private extractString(value: any): string | undefined {
+    if (typeof value === 'string') return value
+    if (typeof value === 'number' || typeof value === 'bigint') return String(value)
+    if (value?.toString) return value.toString()
+    return undefined
+  }
+
+  private toCamelCase(value: string): string {
+    return value.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase())
   }
 }

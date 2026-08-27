@@ -44,3 +44,13 @@ CREATE TABLE IF NOT EXISTS dispute_resolution_log (
 CREATE INDEX IF NOT EXISTS idx_dispute_evidence_dispute ON dispute_evidence(dispute_id);
 CREATE INDEX IF NOT EXISTS idx_dispute_comments_dispute ON dispute_comments(dispute_id);
 CREATE INDEX IF NOT EXISTS idx_dispute_resolution_log_dispute ON dispute_resolution_log(dispute_id);
+
+-- Add encrypted local evidence metadata used by the dispute evidence API.
+ALTER TABLE dispute_evidence
+ADD COLUMN IF NOT EXISTS stored_filename TEXT,
+ADD COLUMN IF NOT EXISTS mime_type TEXT,
+ADD COLUMN IF NOT EXISTS file_size INTEGER,
+ADD COLUMN IF NOT EXISTS file_hash TEXT,
+ADD COLUMN IF NOT EXISTS encryption_iv TEXT,
+ADD COLUMN IF NOT EXISTS file_path TEXT,
+ADD COLUMN IF NOT EXISTS is_removed BOOLEAN DEFAULT FALSE;
