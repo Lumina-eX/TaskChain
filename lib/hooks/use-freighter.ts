@@ -40,9 +40,9 @@ interface TransactionConfirmationModalProps {
 }
 
 const TransactionConfirmationModal: React.FC<TransactionConfirmationModalProps> = (props) => {
-  if (!props.open || !props.details) return null
-
   const [copied, setCopied] = useState(false)
+
+  if (!props.open || !props.details) return null
 
   const handleCopyHash = async () => {
     if (!props.transactionHash) return
@@ -179,7 +179,7 @@ interface UseTransactionConfirmationReturn {
 function useTransactionConfirmation(): UseTransactionConfirmationReturn {
   const [isOpen, setIsOpen] = useState(false)
   const [details, setDetails] = useState<TransactionDetails | undefined>(undefined)
-  const [status, setStatus] = useState<TransactionStatus=('pending')
+  const [status, setStatus] = useState<TransactionStatus>('pending')
   const [transactionHash, setTransactionHash] = useState<string | undefined>(undefined)
   const [error, setError] = useState<string | undefined>(undefined)
   const [explorerUrl, setExplorerUrl] = useState<string | undefined>(undefined)

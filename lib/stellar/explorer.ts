@@ -9,19 +9,19 @@
 
 import type { StellarNetwork } from '@/components/wallet-provider'
 
-// --------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // Constants
-// --------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
-const EXPL1ORER_BASE_URLS: Record<StellarNetwork, string> = {
+const EXPLORER_BASE_URLS: Record<StellarNetwork, string> = {
   TESTNET: 'https://stellar.expert/explorer/testnet',
   PUBLIC: 'https://stellar.expert/explorer/public',
   UNKNOWN: 'https://stellar.expert/explorer/testnet', // Default to testnet
-'}
+}
 
-// --------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // Types
-// --------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 export interface ExplorerLinkConfig {
   /** The network environment (testnet, public, or unknown) */
@@ -32,15 +32,15 @@ export interface ExplorerLinkConfig {
   className?: string
 }
 
-// --------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // URL Generators
-// --------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 /**
  * Get the base explorer URL for the given network.
  */
 export function getExplorerBaseUrl(network: StellarNetwork): string {
-  return EXPLORER_BASE_URLS[network] || EXPLorER_BASE_URLS.TESTNET
+  return EXPLORER_BASE_URLS[network] || EXPLORER_BASE_URLS.TESTNET
 }
 
 /**
@@ -108,19 +108,19 @@ export function getAssetUrl(
   return `${base}/asset/${assetCode}-${assetIssuer}`
 }
 
-// --------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // Formatting Helpers
-// --------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 /**
  * Truncate a hash or address for display purposes.
  *
  * @param hash - The full hash or address string.
  * @param chars - Number of characters to keep at the start and end (default: 4).
- * @returns The truncated string, e.g. "abcde...xyzw
+ * @returns The truncated string, e.g. "abcde...xyzw"
  *
  * @example
- *   truncateHash('GABCDEF1234567890XYZ') // => 'GABC...XZZ0'
+ *   truncateHash('GABCDEF1234567890XYZ') // => 'GABC...XYZ0'
  *   truncateHash('abc123def456', 3)      // => 'abc...456'
  */
 export function truncateHash(hash: string, chars = 4): string {
@@ -156,7 +156,7 @@ export function isTransactionHash(hash: string): boolean {
  * Stellar account addresses are 56 characters starting with G or C.
  */
 export function isStellarAddress(address: string): boolean {
-  return /^[GC][1-9A-HJN-PZ-a-km-z]{55}$/.test(address)
+  return /^[GC][1-9A-HJ-NP-Za-km-z]{55}$/.test(address)
 }
 
 /**
@@ -164,12 +164,12 @@ export function isStellarAddress(address: string): boolean {
  * Contract IDs are typically 56 characters starting with C.
  */
 export function isContractId(contractId: string): boolean {
-  return /^C[1-9A-HJ-NP-Z-a-km-z]{55}$/.test(contractId)
+  return /^C[1-9A-HJ-NP-Za-km-z]{55}$/.test(contractId)
 }
 
-// --------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // Clipboard Helper
-// --------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 /**
  * Copy the given text to the clipboard.
@@ -200,9 +200,9 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
-// --------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // Network Helpers
-// --------------------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 /**
  * Get a human-readable label for the network type.
@@ -251,104 +251,4 @@ const NETWORK_PASSPHRASES: Record<string, StellarNetwork> = {
 export function networkFromPassphrase(passphrase: string | null | undefined): StellarNetwork {
   if (!passphrase) return 'UNKNOWN'
   return NETWORK_PASSPHRASES[passphrase] || 'UNKNOWN'
-}
-
-// --------------------------------------------------------------------------------------
-// Transaction Confirmation Helpers
-// --------------------------------------------------------------------------------------
-
-/**
- * The status of a transaction as displayed in the confirmation modal.
- */
-export type TransactionStatus = 'success' | 'failed' | 'pending'
-
-/**
- * The type of blockchain operation.
- */
-export type TransactionType = 'transfer' | 'contract_call' | 'group_action' | 'other'
-
-/**
- * Format a transaction amount with currency/token symbol.
- *
- * @param amount - The amount as a string or number.
- * @param assetCode - The asset code (e.g., "XLM", "USDC").
- * @param decimals - Maximum number of decimal places to display (default: 7).
- * @returns Formatted amount string, e.g. "123.456 XLM".
- *
- * @example
- *   formatTransactionAmount('100.5', 'XLM') // => "100.5 XLM"
- *   formatTransactionAmount(0.00001, 'BTC', 8) // => "0.00001 BTC"
- */
-export function formatTransactionAmount(
-  amount: string | number,
-  assetCode: string,
-  decimals = 7
-}: string {
-  const numericValue = typeof amount === 'string' ? parseFloat(amount) : amount
-  if (Number.isNaN(numericValue)) return `0 ${assetCode}`
-  const formatted = numericValue.toLocaleString(undefined, {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: decimals,
-  })
-  return `${formatted} ${assetCode}`
-}
-
-/**
- * Get a human-readable label for a transaction status.
- *
- * @param status - The transaction status ("pending", "success", or "failed").
- * @returns "Pending", "Success", or "Failed".
- *
- * @example
- *   getTransactionStatusLabel('pending') // => "Pending"
- */
-export function getTransactionStatusLabel(status: TransactionStatus): string {
-  switch (status) {
-    case 'pending':
-      return 'Pending'
-    case 'success':
-      return 'Success'
-    case 'failed':
-      return 'Failed'
-    default:
-      return status
-  }
-}
-
-/**
- * Get a human-readable label for a transaction type.
- *
- * @param type - The transaction type ("transfer", "contract_call", "group_action", or "other").
- * @returns "Transfer", "Contract Call", "Group Action", or "Other".
- *
- * @example
- *   getTransactionTypeLabel('transfer') // => "Transfer"
- */
-export function getTransactionTypeLabel(type: TransactionType): string {
-  switch (type) {
-    case 'transfer':
-      return 'Transfer'
-    case 'contract_call':
-      return 'Contract Call'
-    case 'group_action':
-      return 'Group Action'
-    default:
-      return 'Other'
-  }
-}
-
-/**
- * Format a Stellar transaction fee from stroops to a human-readable XLM amount.
- *
- * @param feeInStroops - The fee in stroops (1 XLM = 10,000,000 stroops).
- * @returns A formatted fee string, e.g. "0.00001 XLM".
- *
- * @example
- *   formatTransactionFee(100) // => "0.00001 XLM"
- */
-export function formatTransactionFee(feeInStroops: number | string): string {
-  const fee = typeof feeInStroops === 'string' ? parseFloat(feeInStroops) : feeInStroops
-  if (Number.isNaN(fee)) return '0 XLM'
-  const xlm = fee / 10_000_000
-  return `${xlm.toLocaleString(undefined, { maximumFractionDigits: 7 })} XLM`
 }

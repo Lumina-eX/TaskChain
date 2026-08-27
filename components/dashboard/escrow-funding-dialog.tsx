@@ -278,9 +278,9 @@ export function EscrowFundingDialog({
   };
 
   return (
-    >
+    <>
       <Dialog open={open && !showConfirmation} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-wd">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Wallet className="h-5 w-5 text-accent" />
@@ -292,7 +292,7 @@ export function EscrowFundingDialog({
           </DialogHeader>
 
           <div className="space-y-4 py-4">
-            <!-- Contract Info -->
+            {/* Contract Info */}
             <div className="bg-muted/50 rounded-lg p-3 space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Required Amount:</span>
@@ -306,7 +306,7 @@ export function EscrowFundingDialog({
               )}
             </div>
 
-            <!-- Wallet Connection Status -->
+            {/* Wallet Connection Status */}
             {!isConnected ? (
               <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4">
                 <div className="flex items-center gap-2 text-amber-600 dark:text-amber-500 mb-2">
@@ -332,7 +332,7 @@ export function EscrowFundingDialog({
               </div>
             ) : (
               <>
-                <!-- Amount Input -->
+                {/* Amount Input */}
                 <div className="space-y-2">
                   <Label htmlFor="amount">Funding Amount ({currency})</Label>
                   <Input
@@ -347,7 +347,7 @@ export function EscrowFundingDialog({
                   />
                 </div>
 
-                <!-- Validation Status -->
+                {/* Validation Status */}
                 {isValidating && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -369,7 +369,7 @@ export function EscrowFundingDialog({
                   </div>
                 )}
 
-                <!-- Connected Wallet Info -->
+                {/* Connected Wallet Info */}
                 <div className="bg-muted/50 rounded-lg p-3">
                   <div className="flex items-center gap-2 text-sm">
                     <Wallet className="h-4 w-4 text-muted-foreground" />
@@ -380,7 +380,7 @@ export function EscrowFundingDialog({
               </>
             )}
 
-            <!-- Error Display -->
+            {/* Error Display */}
             {error && (
               <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
                 <div className="flex items-center gap-2 text-destructive">
@@ -400,7 +400,7 @@ export function EscrowFundingDialog({
               disabled={!validation.isValid || isConfirming || isSubmitting}
             >
               {isConfirming ? (
-                >
+                <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Preparing...
                 </>
@@ -412,9 +412,9 @@ export function EscrowFundingDialog({
         </DialogContent>
       </Dialog>
 
-      <!-- Confirmation Modal -->
+      {/* Confirmation Modal */}
       <Dialog open={showConfirmation} onOpenChange={handleCloseConfirmation}>
-        <DialogContent className="sm:max-w-d">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               {transactionStatus === 'success' ? (
@@ -432,7 +432,7 @@ export function EscrowFundingDialog({
           </DialogHeader>
 
           <div className="space-y-4 py-4">
-            <!-- Transaction Details -->
+            {/* Transaction Details */}
             <div className="bg-muted/50 rounded-lg p-3 space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Type:</span>
@@ -456,7 +456,7 @@ export function EscrowFundingDialog({
               </div>
             </div>
 
-            <!-- Transaction Status -->
+            {/* Transaction Status */}
             {transactionStatus === 'pending' && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -513,7 +513,7 @@ export function EscrowFundingDialog({
                     disabled={isSubmitting}
                   >
                     {isSubmitting ? (
-                      >
+                      <>
                         <Loader2 className="mr-2 h-3 w-3 animate-spin" />
                         Retrying...
                       </>
@@ -541,7 +541,7 @@ export function EscrowFundingDialog({
                 Close
               </Button>
             ) : (
-              <div className="fler gap-2">
+              <div className="flex gap-2">
                 <Button variant="outline" onClick={handleCloseConfirmation}>
                   Cancel
                 </Button>
