@@ -39,3 +39,17 @@ jobs:
           # during the build. No real DB connection is made at build time.
           DATABASE_URL: ${{ secrets.DATABASE_URL || 'postgres://build:build@localhost/build' }}
           JWT_SECRET: ${{ secrets.JWT_SECRET || 'build-time-placeholder-secret-32chars!!' }}
+
+  contracts:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Soroban Contract Tests
+        working-directory: contracts
+        run: cargo test --workspace

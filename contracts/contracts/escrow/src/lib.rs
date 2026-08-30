@@ -545,8 +545,8 @@ impl EscrowContract {
         Ok(())
     }
 
-    pub fn auto_expire(env: Env, milestone_id: u32) -> Result<(), Error> {
-        let caller = env.caller();
+    pub fn auto_expire(env: Env, caller: Address, milestone_id: u32) -> Result<(), Error> {
+        caller.require_auth();
         let mut milestone: Milestone = env.storage().instance().get(&DataKey::Milestone(milestone_id)).ok_or(Error::MilestoneNotFound)?;
 
         if milestone.deadline == 0 {
