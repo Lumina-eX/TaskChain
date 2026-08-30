@@ -1,6 +1,6 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, contracterror, token, Address, Env, String
+    contract, contractevent, contractimpl, contracttype, contracterror, token, Address, Env, String,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,20 +35,82 @@ pub enum DataKey {
     VoteSupport(Address, u32), // User's vote choice (true = for, false = against)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[contracterror]
+#[repr(u32)]
 pub enum Error {
+    /// ERR_ALREADY_INITIALIZED
     AlreadyInitialized = 1,
+    /// ERR_NOT_INITIALIZED
     NotInitialized = 2,
+    /// ERR_DISPUTE_NOT_FOUND
     DisputeNotFound = 3,
+    /// ERR_DISPUTE_CLOSED
     DisputeClosed = 4,
+    /// ERR_DISPUTE_NOT_CLOSED
     DisputeNotClosed = 5,
+    /// ERR_VOTING_ENDED
     VotingEnded = 6,
+    /// ERR_VOTING_NOT_ENDED
     VotingNotEnded = 7,
+    /// ERR_INVALID_AMOUNT
     ZeroAmount = 8,
+    /// ERR_ALREADY_VOTED
     AlreadyVoted = 9,
+    /// ERR_NO_STAKE
     NoStake = 10,
+    /// ERR_DISPUTE_NOT_RESOLVED
     DisputeNotResolved = 11,
+}
+
+#[contractevent]
+pub struct DisputeCreated {
+    #[topic]
+    pub contract_id: Address,
+    #[topic]
+    pub dispute_id: u32,
+    #[topic]
+    pub actor: Address,
+    pub disputed_amount: i128,
+    pub end_time: u64,
+    pub winner_address: Address,
+    pub loser_address: Address,
+}
+
+#[contractevent]
+pub struct VoteCast {
+    #[topic]
+    pub contract_id: Address,
+    #[topic]
+    pub dispute_id: u32,
+    #[topic]
+    pub actor: Address,
+    pub amount: i128,
+    pub support: bool,
+}
+
+#[contractevent]
+pub struct DisputeResolved {
+    #[topic]
+    pub contract_id: Address,
+    #[topic]
+    pub dispute_id: u32,
+    #[topic]
+    pub actor: Address,
+    pub recipient: Address,
+    pub disputed_amount: i128,
+    pub is_in_favor: bool,
+}
+
+#[contractevent]
+pub struct StakeClaimed {
+    #[topic]
+    pub contract_id: Address,
+    #[topic]
+    pub dispute_id: u32,
+    #[topic]
+    pub actor: Address,
+    pub amount: i128,
 }
 
 #[contract]
@@ -67,6 +129,7 @@ impl DisputeContract {
 
     pub fn create_dispute(
         env: Env,
+        caller:Address,
         title: String,
         description: String,
         duration: u64,
@@ -74,7 +137,6 @@ impl DisputeContract {
         winner_address: Address,
         loser_address: Address,
     ) -> Result<u32, Error> {
-        let caller = env.caller();
         caller.require_auth();
 
         if !env.storage().instance().has(&DataKey::Token) {
@@ -106,12 +168,23 @@ impl DisputeContract {
             votes_against: 0,
             status: DisputeStatus::Open,
             disputed_amount,
-            winner_address,
-            loser_address,
+            winner_address: winner_address.clone(),
+            loser_address: loser_address.clone(),
         };
 
         env.storage().instance().set(&DataKey::Dispute(dispute_id), &dispute);
         env.storage().instance().set(&DataKey::DisputeCount, &(dispute_id + 1));
+
+        DisputeCreated {
+            contract_id: env.current_contract_address(),
+            dispute_id,
+            actor: caller,
+            disputed_amount,
+            end_time: current_time + duration,
+            winner_address,
+            loser_address,
+        }
+        .publish(&env);
 
         Ok(dispute_id)
     }
@@ -168,10 +241,22 @@ impl DisputeContract {
 
         env.storage().instance().set(&DataKey::Dispute(dispute_id), &dispute);
 
+        VoteCast {
+            contract_id: env.current_contract_address(),
+            dispute_id,
+            actor: voter,
+            amount,
+            support,
+        }
+        .publish(&env);
+
         Ok(())
     }
 
     pub fn resolve(env: Env, dispute_id: u32) -> Result<bool, Error> {
+        let caller = env.caller();
+        caller.require_auth();
+
         let mut dispute: Dispute = env
             .storage()
             .instance()
@@ -195,15 +280,25 @@ impl DisputeContract {
             .get(&DataKey::Token)
             .ok_or(Error::NotInitialized)?;
 
-        let token_client = token::Client::new(&env, &token_address);
-
-        if is_in_favor {
-            token_client.transfer(&env.current_contract_address(), &dispute.winner_address, &dispute.disputed_amount);
+        let recipient = if is_in_favor {
+            dispute.winner_address.clone()
         } else {
-            token_client.transfer(&env.current_contract_address(), &dispute.loser_address, &dispute.disputed_amount);
-        }
+            dispute.loser_address.clone()
+        };
+        let token_client = token::Client::new(&env, &token_address);
+        token_client.transfer(&env.current_contract_address(), &recipient, &dispute.disputed_amount);
 
         env.storage().instance().set(&DataKey::Dispute(dispute_id), &dispute);
+
+        DisputeResolved {
+            contract_id: env.current_contract_address(),
+            dispute_id,
+            actor: caller,
+            recipient,
+            disputed_amount: dispute.disputed_amount,
+            is_in_favor,
+        }
+        .publish(&env);
 
         Ok(is_in_favor)
     }
@@ -240,6 +335,14 @@ impl DisputeContract {
 
         // Remove stake to prevent double claiming
         env.storage().instance().remove(&stake_key);
+
+        StakeClaimed {
+            contract_id: env.current_contract_address(),
+            dispute_id,
+            actor: voter,
+            amount,
+        }
+        .publish(&env);
 
         Ok(())
     }

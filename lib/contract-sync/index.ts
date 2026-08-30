@@ -4,6 +4,8 @@ export { SyncQueue } from './queue'
 export { mapEventToAction } from './mapper'
 
 export type {
+  CanonicalSorobanContractEvent,
+  LegacySorobanContractEvent,
   SorobanContractEvent,
   SorobanEventPayload,
   SyncStatus,
@@ -15,5 +17,11 @@ export type {
   ContractStatusUpdate,
   MilestoneStatusUpdate,
 } from './mapper'
-export { getDefaultMaxRetries, getBackoffDelay, ESCROW_EVENT_TOPIC_PREFIX } from './types'
+export {
+  CANONICAL_SOROBAN_EVENTS,
+  getDefaultMaxRetries,
+  getBackoffDelay,
+  normalizeSorobanEvent,
+  ESCROW_EVENT_TOPIC_PREFIX,
+} from './types'
 

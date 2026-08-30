@@ -144,7 +144,40 @@ describe('SorobanEventListener', () => {
       expect(onCheckpoint).toHaveBeenCalledWith(505)
     })
 
-    it('awaits the callback for each event before advancing the checkpoint', async () => {
+    it('normalizes canonical typed event topics and extracts indexed identifiers', async () => {
+    vi.useRealTimers()
+    const canonicalListener = new SorobanEventListener({
+      rpcUrl: 'https://soroban-testnet.stellar.org',
+      networkPassphrase: 'Test SDF Network ; September 2015',
+      contractAddresses: ['CA1234'],
+      initialLedger: 500,
+    })
+    const canonicalCallback = vi.fn()
+    canonicalListener.setCallback(canonicalCallback)
+
+    mockGetEvents.mockResolvedValue({
+      events: [{
+        topic: ['PaymentReleased', 'CA-CONTRACT', '7', 'GACTOR'],
+        value: { recipient: 'GRECIPIENT', amount: '250' },
+        ledger: 501,
+        txHash: 'tx-canonical',
+      }],
+    })
+    mockGetLatestLedger.mockResolvedValue({ sequence: 505 })
+
+    await (canonicalListener as any).poll()
+
+    expect(canonicalCallback).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'payment_released',
+      milestoneId: 7,
+      amount: '250',
+      actor: 'GACTOR',
+      recipient: 'GRECIPIENT',
+    }))
+    canonicalListener.stop()
+  })
+
+  it('awaits the callback for each event before advancing the checkpoint', async () => {
       // Uses real timers and calls the private poll() directly so the
       // ordering can be observed deterministically without racing fake-timer
       // microtask flushing against a manually-controlled promise.
