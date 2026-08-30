@@ -551,23 +551,23 @@ fn test_refund_after_release_fails() {
 fn test_successful_security_events_are_emitted() {
     let setup = setup_test();
     let env = setup.env.clone();
-    let initial_event_count = env.events().all().len();
+    let initial_event_count = env.events().all().events().len();
 
     initialize_single_milestone(&setup, 150);
-    assert_eq!(env.events().all().len(), initial_event_count + 1);
+    assert_eq!(env.events().all().events().len(), initial_event_count + 1);
 
     setup.escrow_client.fund();
-    assert_eq!(env.events().all().len(), initial_event_count + 2);
+    assert_eq!(env.events().all().events().len(), initial_event_count + 2);
 
     setup.escrow_client.submit_milestone(&1);
-    assert_eq!(env.events().all().len(), initial_event_count + 3);
+    assert_eq!(env.events().all().events().len(), initial_event_count + 3);
 
     setup.escrow_client.approve(&1);
-    assert_eq!(env.events().all().len(), initial_event_count + 4);
+    assert_eq!(env.events().all().events().len(), initial_event_count + 4);
 
     setup.escrow_client.freelancer_confirm(&1);
-    assert_eq!(env.events().all().len(), initial_event_count + 5);
+    assert_eq!(env.events().all().events().len(), initial_event_count + 5);
 
     setup.escrow_client.release(&1, &setup.client);
-    assert_eq!(env.events().all().len(), initial_event_count + 6);
+    assert_eq!(env.events().all().events().len(), initial_event_count + 6);
 }

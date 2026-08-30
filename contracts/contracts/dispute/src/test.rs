@@ -108,7 +108,7 @@ fn test_voting_and_resolving() {
     // Fast forward to after deadline
     env.ledger().set_timestamp(1101);
 
-    let is_resolved_in_favor = client.resolve(&dispute_id);
+    let is_resolved_in_favor = client.resolve(&caller, &dispute_id);
     assert_eq!(is_resolved_in_favor, true); // votes_for > votes_against
 
     let dispute_final = client.get_dispute(&dispute_id);

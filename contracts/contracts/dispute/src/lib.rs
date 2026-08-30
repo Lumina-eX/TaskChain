@@ -253,8 +253,7 @@ impl DisputeContract {
         Ok(())
     }
 
-    pub fn resolve(env: Env, dispute_id: u32) -> Result<bool, Error> {
-        let caller = env.caller();
+    pub fn resolve(env: Env, caller: Address, dispute_id: u32) -> Result<bool, Error> {
         caller.require_auth();
 
         let mut dispute: Dispute = env
