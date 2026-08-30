@@ -553,20 +553,62 @@ fn test_successful_security_events_are_emitted() {
     let env = setup.env.clone();
 
     initialize_single_milestone(&setup, 150);
-    assert_eq!(env.events().all().events().len(), 1);
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&setup.escrow_client.address)
+            .events()
+            .len(),
+        1
+    );
 
     setup.escrow_client.fund();
-    assert_eq!(env.events().all().events().len(), 1);
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&setup.escrow_client.address)
+            .events()
+            .len(),
+        1
+    );
 
     setup.escrow_client.submit_milestone(&1);
-    assert_eq!(env.events().all().events().len(), 1);
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&setup.escrow_client.address)
+            .events()
+            .len(),
+        1
+    );
 
     setup.escrow_client.approve(&1);
-    assert_eq!(env.events().all().events().len(), 1);
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&setup.escrow_client.address)
+            .events()
+            .len(),
+        1
+    );
 
     setup.escrow_client.freelancer_confirm(&1);
-    assert_eq!(env.events().all().events().len(), 1);
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&setup.escrow_client.address)
+            .events()
+            .len(),
+        1
+    );
 
     setup.escrow_client.release(&1, &setup.client);
-    assert_eq!(env.events().all().events().len(), 1);
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&setup.escrow_client.address)
+            .events()
+            .len(),
+        1
+    );
 }
