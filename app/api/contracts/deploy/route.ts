@@ -5,6 +5,7 @@ import { withAuth } from '@/lib/auth/middleware'
 import { sql } from '@/lib/db'
 import { deploySorobanEscrow, SorobanDeployError } from '@/lib/soroban/deploy'
 import { activityService } from '@/lib/activity'
+import { contractAuditLogService } from '@/lib/audit-log'
 import {
   createContract,
   createMilestones,
@@ -182,6 +183,17 @@ export const POST = withAuth(async (request: NextRequest, auth) => {
         freelancerId: body.freelancerId,
       },
     }).catch((err: unknown) => console.error('[activity] Failed to log contract_created:', err))
+
+    // Audit log: contract_creation
+    contractAuditLogService.createLog({
+      contractId: contract.id,
+      projectId: Number(job.id),
+      action: 'contract_creation',
+      actorUserId: Number(actorId),
+      actorWallet: auth.walletAddress,
+      newState: 'active',
+      metadata: { totalAmount: body.totalAmount, currency, milestonesCount: milestones.length },
+    }, auth.walletAddress).catch((err: unknown) => console.error('[audit-log] Failed to log contract_creation:', err))
   }
 
   return NextResponse.json(

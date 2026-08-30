@@ -144,17 +144,14 @@ fn test_happy_path() {
     assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Approved);
     assert_eq!(escrow.has_client_approval(&1), true);
 
-    // Freelancer confirms Milestone 1 (multi-sig requirement)
-    escrow.freelancer_confirm(&1);
-    assert_eq!(escrow.has_freelancer_approval(&1), true);
-
-    // Release Milestone 1 by freelancer (now both approvals are present)
-    escrow.release(&1, &setup.freelancer);
+    // Release Milestone 1 by client (client-only authorization)
+    escrow.release(&1, &setup.client);
     assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Released);
 
-    // Verify token payout
+    // Verify token payout and escrow balance tracking
     assert_eq!(token_client.balance(&setup.freelancer), 100);
     assert_eq!(token_client.balance(&escrow.address), 200);
+    assert_eq!(escrow.get_escrow_balance(), 200);
 }
 
 #[test]
@@ -327,11 +324,9 @@ fn test_unauthorized_release_fails() {
     escrow.fund();
     escrow.submit_milestone(&1);
     escrow.approve(&1);
-    escrow.freelancer_confirm(&1);
 
-    // Random address tries to trigger release
-    let stranger = Address::generate(&env);
-    escrow.release(&1, &stranger);
+    // Freelancer tries to trigger release (unauthorized, only client can do this)
+    escrow.release(&1, &setup.freelancer);
 }
 
 #[test]
@@ -358,7 +353,7 @@ fn test_version() {
 
 #[test]
 #[should_panic(expected = "HostError: Error(Contract, #9)")]
-fn test_release_without_both_approvals_fails() {
+fn test_release_without_approval_fails() {
     let setup = setup_test();
     let escrow = setup.escrow_client;
     let env = setup.env;
@@ -377,8 +372,7 @@ fn test_release_without_both_approvals_fails() {
     escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
     escrow.fund();
     escrow.submit_milestone(&1);
-    escrow.approve(&1);
-    // Missing freelancer_confirm - should fail with InsufficientApprovals (error code 9)
+    // Missing client approval - should fail with InsufficientApprovals (error code 9)
     escrow.release(&1, &setup.client);
 }
 
@@ -456,11 +450,9 @@ fn test_dispute_clears_approvals() {
     escrow.fund();
     escrow.submit_milestone(&1);
     escrow.approve(&1);
-    escrow.freelancer_confirm(&1);
 
-    // Verify both approvals are set
+    // Verify client approval is set
     assert_eq!(escrow.has_client_approval(&1), true);
-    assert_eq!(escrow.has_freelancer_approval(&1), true);
 
     // Client disputes the milestone
     escrow.dispute(&1, &setup.client);
@@ -468,7 +460,6 @@ fn test_dispute_clears_approvals() {
 
     // Verify approvals are cleared
     assert_eq!(escrow.has_client_approval(&1), false);
-    assert_eq!(escrow.has_freelancer_approval(&1), false);
 }
 
 #[test]

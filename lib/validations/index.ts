@@ -168,6 +168,17 @@ export const ALLOWED_DELIVERABLE_MIME_TYPES = [
 export const MAX_DELIVERABLE_FILE_SIZE = 50 * 1024 * 1024 // 50 MB
 export const MAX_DELIVERABLE_FILES_PER_BATCH = 10
 
+export const ALLOWED_DISPUTE_EVIDENCE_MIME_TYPES = [
+  ...ALLOWED_DELIVERABLE_MIME_TYPES,
+  'video/mp4',
+  'video/webm',
+  'video/quicktime',
+  'video/x-msvideo',
+] as const
+
+export const MAX_DISPUTE_EVIDENCE_FILE_SIZE = 50 * 1024 * 1024 // 50 MB
+export const MAX_DISPUTE_EVIDENCE_FILES_PER_BATCH = 10
+
 export const DeliverableMetadataSchema = z.object({
   id: z.string().uuid(),
   milestone_id: z.string().uuid(),

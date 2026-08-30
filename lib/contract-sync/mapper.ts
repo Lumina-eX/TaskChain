@@ -1,4 +1,8 @@
+import {
+  normalizeSorobanEvent,
+} from './types'
 import type {
+  CanonicalSorobanContractEvent,
   SorobanContractEvent,
   SorobanEventPayload,
 } from './types'
@@ -40,8 +44,10 @@ function nowISO(): string {
 }
 
 export function mapEventToAction(event: SorobanContractEvent, data: SorobanEventPayload): SyncAction {
-  switch (event) {
-    case 'init':
+  const normalizedEvent = normalizeSorobanEvent(String(event))
+
+  switch (normalizedEvent as CanonicalSorobanContractEvent | null) {
+    case 'escrow_created':
       return {
         kind: 'noop',
         contractUpdate: null,
@@ -50,7 +56,7 @@ export function mapEventToAction(event: SorobanContractEvent, data: SorobanEvent
         disputeInfo: null,
       }
 
-    case 'fund':
+    case 'escrow_funded':
       return {
         kind: 'update_contract',
         contractUpdate: {
@@ -64,7 +70,7 @@ export function mapEventToAction(event: SorobanContractEvent, data: SorobanEvent
         disputeInfo: null,
       }
 
-    case 'submit':
+    case 'milestone_submitted':
       return {
         kind: 'update_milestone',
         contractUpdate: null,
@@ -76,7 +82,8 @@ export function mapEventToAction(event: SorobanContractEvent, data: SorobanEvent
         disputeInfo: null,
       }
 
-    case 'approve':
+    case 'milestone_approved':
+    case 'milestone_confirmed':
       return {
         kind: 'update_milestone',
         contractUpdate: null,
@@ -88,19 +95,7 @@ export function mapEventToAction(event: SorobanContractEvent, data: SorobanEvent
         disputeInfo: null,
       }
 
-    case 'confirm':
-      return {
-        kind: 'update_milestone',
-        contractUpdate: null,
-        milestoneUpdate: {
-          status: 'approved',
-          approvedAt: nowISO(),
-        },
-        milestoneId: data.milestoneId ?? null,
-        disputeInfo: null,
-      }
-
-    case 'release':
+    case 'payment_released':
       return {
         kind: 'update_both',
         contractUpdate: {
@@ -116,7 +111,7 @@ export function mapEventToAction(event: SorobanContractEvent, data: SorobanEvent
         disputeInfo: null,
       }
 
-    case 'refund':
+    case 'refund_issued':
       return {
         kind: 'update_both',
         contractUpdate: {
@@ -133,7 +128,7 @@ export function mapEventToAction(event: SorobanContractEvent, data: SorobanEvent
         disputeInfo: null,
       }
 
-    case 'dispute':
+    case 'dispute_raised':
       return {
         kind: 'update_both',
         contractUpdate: {
@@ -149,22 +144,37 @@ export function mapEventToAction(event: SorobanContractEvent, data: SorobanEvent
         },
       }
 
-    case 'resolve':
+    case 'dispute_resolved': {
+      const resolvedToFreelancer = data.releaseToFreelancer !== false
       return {
         kind: 'update_both',
         contractUpdate: {
-          contractStatus: 'completed',
-          completedAt: nowISO(),
+          escrowStatus: resolvedToFreelancer ? 'fully_released' : 'refunded',
+          contractStatus: resolvedToFreelancer ? 'completed' : 'cancelled',
+          ...(resolvedToFreelancer
+            ? { completedAt: nowISO() }
+            : { cancelledAt: nowISO(), cancelledReason: 'Dispute resolved in client favor' }),
         },
-        milestoneUpdate: {
-          status: 'paid',
-          paidAt: nowISO(),
-        },
+        milestoneUpdate: resolvedToFreelancer
+          ? { status: 'paid', paidAt: nowISO() }
+          : { status: 'refunded', rejectionReason: 'Dispute resolved in client favor' },
         milestoneId: data.milestoneId ?? null,
         disputeInfo: null,
       }
+    }
 
-    case 'expire':
+    case 'dispute_created':
+    case 'vote_cast':
+    case 'stake_claimed':
+      return {
+        kind: 'noop',
+        contractUpdate: null,
+        milestoneUpdate: null,
+        milestoneId: null,
+        disputeInfo: null,
+      }
+
+    case 'milestone_expired':
       return {
         kind: 'update_milestone',
         contractUpdate: null,
