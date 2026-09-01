@@ -1,7 +1,7 @@
 // app/api/projects/route.ts
 //
 // POST /api/projects  — create a project
-// GET  /api/projects  — list projects (with optional ?clientId= &status= &limit= &offset=)
+// GET  /api/projects  — list projects (with optional filtering & sorting)
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
@@ -10,6 +10,8 @@ import { createProject, listProjects, type ProjectStatus } from "@/lib/projects"
 // ─── Validation schemas ────────────────────────────────────────────────────
 
 const PROJECT_STATUS = ["open", "in_progress", "completed", "cancelled"] as const;
+const SORT_BY = ["newest", "budget", "deadline"] as const;
+const SORT_ORDER = ["asc", "desc"] as const;
 
 const CreateProjectSchema = z.object({
   clientId: z
@@ -32,11 +34,18 @@ const CreateProjectSchema = z.object({
     .int("milestoneCount must be an integer")
     .min(0, "milestoneCount cannot be negative")
     .optional(),
+  deadline: z.string().datetime({ offset: true }).optional().nullable(),
+  skills: z.array(z.string()).optional(),
 });
 
 const ListProjectsSchema = z.object({
   clientId: z.string().uuid("clientId must be a valid UUID").optional(),
   status:   z.enum(PROJECT_STATUS).optional(),
+  budgetMin: z.coerce.number().nonnegative("budgetMin must be non-negative").optional(),
+  budgetMax: z.coerce.number().nonnegative("budgetMax must be non-negative").optional(),
+  skills:   z.string().optional(),
+  sortBy:   z.enum(SORT_BY).optional(),
+  sortOrder: z.enum(SORT_ORDER).optional(),
   limit:    z.coerce.number().int().min(1).max(100).optional(),
   offset:   z.coerce.number().int().min(0).optional(),
 });
@@ -82,6 +91,11 @@ export async function GET(req: NextRequest) {
   const parsed = ListProjectsSchema.safeParse({
     clientId: searchParams.get("clientId") ?? undefined,
     status:   searchParams.get("status")   ?? undefined,
+    budgetMin: searchParams.get("budgetMin") ?? undefined,
+    budgetMax: searchParams.get("budgetMax") ?? undefined,
+    skills:   searchParams.get("skills")   ?? undefined,
+    sortBy:   searchParams.get("sortBy")   ?? undefined,
+    sortOrder: searchParams.get("sortOrder") ?? undefined,
     limit:    searchParams.get("limit")    ?? undefined,
     offset:   searchParams.get("offset")   ?? undefined,
   });
@@ -95,10 +109,10 @@ export async function GET(req: NextRequest) {
 
   try {
     const projects = await listProjects({
-      clientId: parsed.data.clientId,
-      status:   parsed.data.status as ProjectStatus | undefined,
-      limit:    parsed.data.limit,
-      offset:   parsed.data.offset,
+      ...parsed.data,
+      skills: parsed.data.skills
+        ? parsed.data.skills.split(",").map(s => s.trim()).filter(Boolean)
+        : undefined,
     });
     return NextResponse.json(projects);
   } catch (err) {
