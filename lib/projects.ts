@@ -14,6 +14,8 @@ import { sql } from "@/lib/db";
 // ─── Types ─────────────────────────────────────────────────────────────────
 
 export type ProjectStatus = "open" | "in_progress" | "completed" | "cancelled";
+export type ProjectSortBy = "newest" | "budget" | "deadline";
+export type SortOrder = "asc" | "desc";
 
 export interface Project {
   id: string;
@@ -25,6 +27,8 @@ export interface Project {
   milestoneCount: number;
   createdAt: string;
   updatedAt: string;
+  deadline: string | null;
+  skills: string[];
 }
 
 export interface CreateProjectInput {
@@ -33,6 +37,8 @@ export interface CreateProjectInput {
   description?: string;
   budgetUsdc: number;
   milestoneCount?: number;
+  deadline?: string | null;
+  skills?: string[];
 }
 
 export interface UpdateProjectInput {
@@ -41,11 +47,18 @@ export interface UpdateProjectInput {
   budgetUsdc?: number;
   status?: ProjectStatus;
   milestoneCount?: number;
+  deadline?: string | null;
+  skills?: string[];
 }
 
 export interface ListProjectsFilter {
   clientId?: string;
   status?: ProjectStatus;
+  budgetMin?: number;
+  budgetMax?: number;
+  skills?: string[];
+  sortBy?: ProjectSortBy;
+  sortOrder?: SortOrder;
   limit?: number;
   offset?: number;
 }
@@ -63,6 +76,8 @@ function rowToProject(row: Record<string, unknown>): Project {
     milestoneCount: Number(row.milestone_count),
     createdAt:      (row.created_at as Date).toISOString(),
     updatedAt:      (row.updated_at as Date).toISOString(),
+    deadline:       row.deadline ? new Date(row.deadline as string).toISOString() : null,
+    skills:         Array.isArray(row.skills) ? (row.skills as string[]) : [],
   };
 }
 
@@ -78,14 +93,18 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
       title,
       description,
       budget_usdc,
-      milestone_count
+      milestone_count,
+      deadline,
+      skills
     )
     VALUES (
       ${input.clientId},
       ${input.title},
       ${input.description ?? null},
       ${input.budgetUsdc},
-      ${input.milestoneCount ?? 0}
+      ${input.milestoneCount ?? 0},
+      ${input.deadline ?? null},
+      ${input.skills ?? []}
     )
     RETURNING *
   `;
@@ -93,52 +112,67 @@ export async function createProject(input: CreateProjectInput): Promise<Project>
 }
 
 /**
- * Returns a paginated list of projects, optionally filtered by clientId
- * and/or status. Ordered by created_at descending (newest first).
+ * Returns a paginated list of projects, optionally filtered by clientId,
+ * status, budget range, skills, and sorted by the provided criteria.
+ * Ordered by new projects first by default.
  */
 export async function listProjects(filter: ListProjectsFilter = {}): Promise<Project[]> {
   const limit  = Math.min(filter.limit  ?? 20, 100); // hard cap at 100
   const offset = filter.offset ?? 0;
 
-  // Build WHERE clauses dynamically. Neon's tagged-template approach requires
-  // all placeholders to appear in the literal at build time, so we branch
-  // into four possible queries rather than building a string.
-  let rows: Record<string, unknown>[];
+  const { neon: neonFn } = await import("@neondatabase/serverless");
+  const directSql = neonFn(process.env.DATABASE_URL!);
 
-  if (filter.clientId && filter.status) {
-    rows = await sql`
-      SELECT * FROM projects
-      WHERE  client_id = ${filter.clientId}
-        AND  status    = ${filter.status}
-      ORDER BY created_at DESC
-      LIMIT  ${limit}
-      OFFSET ${offset}
-    ` as Record<string, unknown>[];
-  } else if (filter.clientId) {
-    rows = await sql`
-      SELECT * FROM projects
-      WHERE  client_id = ${filter.clientId}
-      ORDER BY created_at DESC
-      LIMIT  ${limit}
-      OFFSET ${offset}
-    ` as Record<string, unknown>[];
-  } else if (filter.status) {
-    rows = await sql`
-      SELECT * FROM projects
-      WHERE  status = ${filter.status}
-      ORDER BY created_at DESC
-      LIMIT  ${limit}
-      OFFSET ${offset}
-    ` as Record<string, unknown>[];
-  } else {
-    rows = await sql`
-      SELECT * FROM projects
-      ORDER BY created_at DESC
-      LIMIT  ${limit}
-      OFFSET ${offset}
-    ` as Record<string, unknown>[];
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (filter.clientId) {
+    params.push(filter.clientId);
+    conditions.push(`client_id = $${params.length}`);
+  }
+  if (filter.status) {
+    params.push(filter.status);
+    conditions.push(`status = $${params.length}`);
+  }
+  if (filter.budgetMin !== undefined) {
+    params.push(filter.budgetMin);
+    conditions.push(`budget_usdc >= $${params.length}`);
+  }
+  if (filter.budgetMax !== undefined) {
+    params.push(filter.budgetMax);
+    conditions.push(`budget_usdc <= $${params.length}`);
+  }
+  if (filter.skills && filter.skills.length > 0) {
+    params.push(filter.skills);
+    conditions.push(`skills && $${params.length}::text[]`);
   }
 
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  // Validate and build ORDER BY clause.
+  const allowedSortColumns: Record<ProjectSortBy, string> = {
+    newest: "created_at",
+    budget: "budget_usdc",
+    deadline: "deadline",
+  };
+  const sortBy = filter.sortBy ?? "newest";
+  const sortOrder = filter.sortOrder ?? (sortBy === "newest" ? "desc" : "asc");
+  const orderColumn = allowedSortColumns[sortBy] ?? "created_at";
+  const orderDirection = sortOrder === "asc" ? "ASC" : "DESC";
+  const orderClause = `ORDER BY ${orderColumn} ${orderDirection}`;
+
+  const query = `
+    SELECT *
+    FROM projects
+    ${whereClause}
+    ${orderClause}
+    LIMIT $${params.length + 1}
+    OFFSET $${params.length + 2}
+  `;
+
+  params.push(limit, offset);
+
+  const rows = await directSql(query, params) as Record<string, unknown>[];
   return rows.map(rowToProject);
 }
 
@@ -176,6 +210,8 @@ export async function updateProject(
   if (input.budgetUsdc !== undefined)     { fields.push("budget_usdc");     values.push(input.budgetUsdc); }
   if (input.status !== undefined)         { fields.push("status");          values.push(input.status); }
   if (input.milestoneCount !== undefined) { fields.push("milestone_count"); values.push(input.milestoneCount); }
+  if (input.deadline !== undefined)        { fields.push("deadline");        values.push(input.deadline); }
+  if (input.skills !== undefined)          { fields.push("skills");          values.push(input.skills); }
 
   if (fields.length === 0) {
     // Nothing to update — just fetch and return the current record.
