@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Search, Filter, ChevronRight, Loader2 } from "lucide-react";
+import { Search, Filter, ChevronRight, Loader2, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -14,15 +14,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+type ProjectStatus = "pending" | "in-progress" | "pending-approval" | "completed";
+
 interface Project {
   id: string;
   title: string;
-  status: "pending" | "in-progress" | "pending-approval" | "completed";
+  status: ProjectStatus;
   budget: number;
   progress: number;
   milestonesCount: number;
   completedMilestones: number;
   deadline: string;
+  createdAt: string;
+  skills: string[];
 }
 
 const statusConfig = {
@@ -53,8 +57,50 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [minBudget, setMinBudget] = useState("");
+  const [maxBudget, setMaxBudget] = useState("");
+  const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+  const [sortBy, setSortBy] = useState("newest");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
   const [now] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get("q") ?? "";
+    setSearchTerm(q);
+    setDebouncedSearchTerm(q);
+    if (params.get("status")) setStatusFilter(params.get("status")!);
+    if (params.get("minBudget")) setMinBudget(params.get("minBudget")!);
+    if (params.get("maxBudget")) setMaxBudget(params.get("maxBudget")!);
+    const skillParams = (params.get("skills") ?? "").split(",").filter(Boolean);
+    if (skillParams.length) setSelectedSkills(skillParams);
+    if (params.get("sort")) setSortBy(params.get("sort")!);
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    const handler = setTimeout(() => setDebouncedSearchTerm(searchTerm), 300);
+    return () => clearTimeout(handler);
+  }, [searchTerm]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams();
+    if (debouncedSearchTerm) params.set("q", debouncedSearchTerm);
+    if (statusFilter !== "all") params.set("status", statusFilter);
+    if (minBudget) params.set("minBudget", minBudget);
+    if (maxBudget) params.set("maxBudget", maxBudget);
+    if (selectedSkills.length) params.set("skills", selectedSkills.join(","));
+    if (sortBy !== "newest") params.set("sort", sortBy);
+    const qs = params.toString();
+    const url = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
+    window.history.replaceState(null, "", url);
+  }, [hydrated, debouncedSearchTerm, statusFilter, minBudget, maxBudget, selectedSkills, sortBy]);
 
   useEffect(() => {
     (async () => {
@@ -69,6 +115,8 @@ export default function ProjectsPage() {
           id: string; title: string; status: string;
           budget_max: string | null; deadline: string | null;
           milestones_count: number; completed_milestones: number;
+          created_at?: string | null; skills?: string[] | null;
+          required_skills?: string[] | null;
         }) => ({
           id: p.id,
           title: p.title,
@@ -83,6 +131,12 @@ export default function ProjectsPage() {
           deadline: p.deadline
             ? new Date(p.deadline).toISOString().split("T")[0]
             : new Date(Date.now() + 30 * 86400000).toISOString().split("T")[0],
+          createdAt: p.created_at ?? "",
+          skills: Array.isArray(p.skills)
+            ? p.skills
+            : Array.isArray(p.required_skills)
+              ? p.required_skills!
+              : [],
         }));
         setProjects(mapped);
       } finally {
@@ -91,14 +145,60 @@ export default function ProjectsPage() {
     })();
   }, []);
 
+  const allSkills = useMemo(
+    () => Array.from(new Set(projects.flatMap((p) => p.skills))).sort(),
+    [projects]
+  );
+
+  const activeFilterCount =
+    (statusFilter !== "all" ? 1 : 0) +
+    (minBudget ? 1 : 0) +
+    (maxBudget ? 1 : 0) +
+    selectedSkills.length;
+
+  const clearAllFilters = () => {
+    setSearchTerm("");
+    setDebouncedSearchTerm("");
+    setStatusFilter("all");
+    setMinBudget("");
+    setMaxBudget("");
+    setSelectedSkills([]);
+    setSortBy("newest");
+  };
+
   const filtered = useMemo(
-    () =>
-      projects.filter((p) => {
-        const matchSearch = p.title.toLowerCase().includes(searchTerm.toLowerCase());
-        const matchStatus = statusFilter === "all" || p.status === statusFilter;
-        return matchSearch && matchStatus;
-      }),
-    [projects, searchTerm, statusFilter]
+    () => {
+      const min = minBudget ? parseFloat(minBudget) : 0;
+      const max = maxBudget ? parseFloat(maxBudget) : Infinity;
+      return projects
+        .filter((p) => {
+          const matchSearch = p.title
+            .toLowerCase()
+            .includes(debouncedSearchTerm.toLowerCase());
+          const matchStatus =
+            statusFilter === "all" ||
+            (statusFilter === "active"
+              ? p.status !== "completed"
+              : p.status === statusFilter);
+          const matchBudget = p.budget >= min && p.budget <= max;
+          const matchSkills =
+            selectedSkills.length === 0 ||
+            selectedSkills.every((skill) => p.skills.includes(skill));
+          return matchSearch && matchStatus && matchBudget && matchSkills;
+        })
+        .sort((a, b) => {
+          if (sortBy === "budget-asc") return a.budget - b.budget;
+          if (sortBy === "budget-desc") return b.budget - a.budget;
+          if (sortBy === "deadline-asc")
+            return new Date(a.deadline).getTime() - new Date(b.deadline).getTime();
+          if (sortBy === "deadline-desc")
+            return new Date(b.deadline).getTime() - new Date(a.deadline).getTime();
+          const timeA = a.createdAt ? new Date(a.createdAt).getTime() || 0 : 0;
+          const timeB = b.createdAt ? new Date(b.createdAt).getTime() || 0 : 0;
+          return timeB - timeA || b.id.localeCompare(a.id);
+        });
+    },
+    [projects, debouncedSearchTerm, statusFilter, minBudget, maxBudget, selectedSkills, sortBy]
   );
 
   return (
@@ -109,29 +209,124 @@ export default function ProjectsPage() {
           <p className="text-muted-foreground mt-2">View and manage all your projects</p>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="flex-1 relative">
-            <Search className="absolute left-3 top-3 h-5 w-5 text-muted-foreground" />
-            <Input
-              placeholder="Search projects..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 border-border/40"
-            />
-          </div>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-full sm:w-48 border-border/40">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-col sm:flex-row gap-4">
+            <div className="flex-1 relative">
+              <Search className="absolute left-3 top-3 h-5 w-5 text-muted-foreground" />
+              <Input
+                placeholder="Search projects..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10 border-border/40"
+              />
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => setFiltersOpen((open) => !open)}
+              className="sm:w-auto border-border/40"
+            >
               <Filter className="h-4 w-4 mr-2" />
-              <SelectValue placeholder="Filter by status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Projects</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
-              <SelectItem value="in-progress">In Progress</SelectItem>
-              <SelectItem value="pending-approval">Pending Approval</SelectItem>
-              <SelectItem value="completed">Completed</SelectItem>
-            </SelectContent>
-          </Select>
+              Filters
+              {activeFilterCount > 0 && (
+                <Badge className="ml-2">{activeFilterCount}</Badge>
+              )}
+            </Button>
+            <Select value={sortBy} onValueChange={setSortBy}>
+              <SelectTrigger className="w-full sm:w-48 border-border/40">
+                <SelectValue placeholder="Sort by" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="newest">Newest First</SelectItem>
+                <SelectItem value="budget-asc">Budget: Low to High</SelectItem>
+                <SelectItem value="budget-desc">Budget: High to Low</SelectItem>
+                <SelectItem value="deadline-asc">Deadline: Soonest</SelectItem>
+                <SelectItem value="deadline-desc">Deadline: Latest</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {filtersOpen && (
+            <div className="rounded-xl border border-border/40 bg-card/50 p-4 space-y-4">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Status</label>
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger className="w-full border-border/40">
+                      <SelectValue placeholder="Filter by status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Statuses</SelectItem>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="in-progress">In Progress</SelectItem>
+                      <SelectItem value="pending-approval">Pending Approval</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Min Budget</label>
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={minBudget}
+                    onChange={(e) => setMinBudget(e.target.value)}
+                    className="border-border/40"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Max Budget</label>
+                  <Input
+                    type="number"
+                    min="0"
+                    placeholder="No limit"
+                    value={maxBudget}
+                    onChange={(e) => setMaxBudget(e.target.value)}
+                    className="border-border/40"
+                  />
+                </div>
+              </div>
+
+              {allSkills.length > 0 && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Required Skills</label>
+                  <div className="flex flex-wrap gap-2">
+                    {allSkills.map((skill) => {
+                      const isSelected = selectedSkills.includes(skill);
+                      return (
+                        <button
+                          key={skill}
+                          type="button"
+                          onClick={() =>
+                            setSelectedSkills((prev) =>
+                              isSelected
+                                ? prev.filter((s) => s !== skill)
+                                : [...prev, skill]
+                            )
+                          }
+                          className={`rounded-full px-3 py-1 text-sm border transition-colors ${
+                            isSelected
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "bg-muted text-muted-foreground border-border/40 hover:bg-muted/70"
+                          }`}
+                        >
+                          {skill}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <Button variant="outline" onClick={clearAllFilters} className="border-border/40">
+                  <RotateCcw className="h-4 w-4 mr-2" />
+                  Clear All Filters
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
 
         {loading ? (
@@ -217,7 +412,7 @@ export default function ProjectsPage() {
                 : "No projects match your filters."}
             </p>
             {projects.length > 0 && (
-              <Button variant="outline" onClick={() => { setSearchTerm(""); setStatusFilter("all"); }}>
+              <Button variant="outline" onClick={clearAllFilters}>
                 Clear Filters
               </Button>
             )}
