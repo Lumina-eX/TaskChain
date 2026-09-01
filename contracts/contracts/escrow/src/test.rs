@@ -1,7 +1,10 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, vec, Address, Env, String};
+use soroban_sdk::{
+    testutils::{Address as _, Events as _},
+    vec, Address, Env, String,
+};
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -52,9 +55,44 @@ fn setup_test() -> TestSetup {
     }
 }
 
-/// Build a single generic milestone with id=1 and no deadline.
-fn single_milestone(env: &Env, amount: i128) -> Vec<Milestone> {
-    let m = Milestone {
+fn milestone(env: &Env, id: u32, amount: i128) -> Milestone {
+    Milestone {
+        id,
+        deadline: 0,
+        amount,
+        status: MilestoneStatus::Pending,
+        description: String::from_str(env, "Security milestone"),
+        client_approved: false,
+        freelancer_approved: false,
+    }
+}
+
+fn initialize_single_milestone(setup: &TestSetup, amount: i128) {
+    let milestones = vec![&setup.env, milestone(&setup.env, 1, amount)];
+    setup.escrow_client.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &setup.token_address,
+        &milestones,
+    );
+}
+
+fn fully_approve_single_milestone(setup: &TestSetup) {
+    setup.escrow_client.fund();
+    setup.escrow_client.submit_milestone(&1);
+    setup.escrow_client.approve(&1);
+    setup.escrow_client.freelancer_confirm(&1);
+}
+
+#[test]
+fn test_happy_path() {
+    let setup = setup_test();
+    let escrow = setup.escrow_client;
+    let env = setup.env;
+
+    let milestone_1 = Milestone {
         id: 1,
         deadline: 0,
         amount,
@@ -505,8 +543,8 @@ fn test_submit_before_start_work_fails() {
 // Cannot release without client approval
 // ---------------------------------------------------------------------------
 #[test]
-#[should_panic(expected = "HostError")]
-fn test_release_without_client_approval_fails() {
+#[should_panic(expected = "HostError: Error(Contract, #6)")]
+fn test_double_client_approval_fails() {
     let setup = setup_test();
     let escrow = &setup.escrow_client;
 
@@ -529,22 +567,7 @@ fn test_release_without_freelancer_confirm_fails() {
     init_and_start(&setup);
     escrow.submit_milestone(&1);
     escrow.approve(&1);
-    // Missing freelancer_confirm.
-    escrow.release(&1, &setup.freelancer);
-}
-
-// ---------------------------------------------------------------------------
-// Cannot release by a stranger (unauthorized)
-// ---------------------------------------------------------------------------
-#[test]
-#[should_panic(expected = "HostError")]
-fn test_release_by_stranger_fails() {
-    let setup = setup_test();
-    let escrow = &setup.escrow_client;
-    let env = &setup.env;
-
-    init_and_start(&setup);
-    escrow.submit_milestone(&1);
+    // Once approved, the milestone is no longer in Submitted state.
     escrow.approve(&1);
     escrow.freelancer_confirm(&1);
 
@@ -767,4 +790,155 @@ fn test_resolve_dispute_by_stranger_fails() {
 
     // Verify approvals are cleared
     assert_eq!(escrow.has_client_approval(&1), false);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #7)")]
+fn test_unauthorized_refund_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 150);
+    setup.escrow_client.fund();
+
+    setup.escrow_client.refund(&1, &setup.client);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #7)")]
+fn test_unauthorized_dispute_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 150);
+    setup.escrow_client.fund();
+
+    let stranger = Address::generate(&setup.env);
+    setup.escrow_client.dispute(&1, &stranger);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #5)")]
+fn test_submit_invalid_milestone_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 150);
+    setup.escrow_client.fund();
+
+    setup.escrow_client.submit_milestone(&99);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #5)")]
+fn test_release_invalid_milestone_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 150);
+    fully_approve_single_milestone(&setup);
+
+    setup.escrow_client.release(&99, &setup.client);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #6)")]
+fn test_double_release_replay_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 150);
+    fully_approve_single_milestone(&setup);
+    setup.escrow_client.release(&1, &setup.client);
+
+    setup.escrow_client.release(&1, &setup.client);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #6)")]
+fn test_double_refund_replay_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 150);
+    setup.escrow_client.fund();
+    setup.escrow_client.refund(&1, &setup.freelancer);
+
+    setup.escrow_client.refund(&1, &setup.freelancer);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #6)")]
+fn test_dispute_after_release_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 150);
+    fully_approve_single_milestone(&setup);
+    setup.escrow_client.release(&1, &setup.client);
+
+    setup.escrow_client.dispute(&1, &setup.client);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #6)")]
+fn test_refund_after_release_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 150);
+    fully_approve_single_milestone(&setup);
+    setup.escrow_client.release(&1, &setup.client);
+
+    setup.escrow_client.refund(&1, &setup.freelancer);
+}
+
+#[test]
+fn test_successful_security_events_are_emitted() {
+    let setup = setup_test();
+    let env = setup.env.clone();
+
+    initialize_single_milestone(&setup, 150);
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&setup.escrow_client.address)
+            .events()
+            .len(),
+        1
+    );
+
+    setup.escrow_client.fund();
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&setup.escrow_client.address)
+            .events()
+            .len(),
+        1
+    );
+
+    setup.escrow_client.submit_milestone(&1);
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&setup.escrow_client.address)
+            .events()
+            .len(),
+        1
+    );
+
+    setup.escrow_client.approve(&1);
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&setup.escrow_client.address)
+            .events()
+            .len(),
+        1
+    );
+
+    setup.escrow_client.freelancer_confirm(&1);
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&setup.escrow_client.address)
+            .events()
+            .len(),
+        1
+    );
+
+    setup.escrow_client.release(&1, &setup.client);
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&setup.escrow_client.address)
+            .events()
+            .len(),
+        1
+    );
 }
