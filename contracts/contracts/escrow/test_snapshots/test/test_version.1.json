@@ -200,55 +200,86 @@
                       "key": {
                         "vec": [
                           {
-                            "symbol": "Milestones"
+                            "symbol": "Milestone"
+                          },
+                          {
+                            "u32": 1
+                          }
+                        ]
+                      },
+                      "val": {
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "amount"
+                            },
+                            "val": {
+                              "i128": "100"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "client_approved"
+                            },
+                            "val": {
+                              "bool": false
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "deadline"
+                            },
+                            "val": {
+                              "u64": "0"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "description"
+                            },
+                            "val": {
+                              "string": "M"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "freelancer_approved"
+                            },
+                            "val": {
+                              "bool": false
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "id"
+                            },
+                            "val": {
+                              "u32": 1
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "status"
+                            },
+                            "val": {
+                              "u32": 0
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "MilestoneIds"
                           }
                         ]
                       },
                       "val": {
                         "vec": [
                           {
-                            "map": [
-                              {
-                                "key": {
-                                  "symbol": "amount"
-                                },
-                                "val": {
-                                  "i128": "100"
-                                }
-                              },
-                              {
-                                "key": {
-                                  "symbol": "deadline"
-                                },
-                                "val": {
-                                  "u64": "0"
-                                }
-                              },
-                              {
-                                "key": {
-                                  "symbol": "description"
-                                },
-                                "val": {
-                                  "string": "Milestone"
-                                }
-                              },
-                              {
-                                "key": {
-                                  "symbol": "id"
-                                },
-                                "val": {
-                                  "u32": 1
-                                }
-                              },
-                              {
-                                "key": {
-                                  "symbol": "status"
-                                },
-                                "val": {
-                                  "u32": 0
-                                }
-                              }
-                            ]
+                            "u32": 1
                           }
                         ]
                       }

@@ -86,6 +86,25 @@
     ],
     [
       [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+              "function_name": "start_milestone",
+              "args": [
+                {
+                  "u32": 1
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [
+      [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
         {
           "function": {
@@ -223,6 +242,46 @@
               "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
               "key": {
                 "ledger_key_nonce": {
+                  "nonce": "4270020994084947596"
+                }
+              },
+              "durability": "temporary",
+              "val": "void"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6311999
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+              "key": {
+                "ledger_key_nonce": {
+                  "nonce": "4837995959683129791"
+                }
+              },
+              "durability": "temporary",
+              "val": "void"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6311999
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+              "key": {
+                "ledger_key_nonce": {
                   "nonce": "2032731177588607455"
                 }
               },
@@ -243,27 +302,7 @@
               "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
               "key": {
                 "ledger_key_nonce": {
-                  "nonce": "4270020994084947596"
-                }
-              },
-              "durability": "temporary",
-              "val": "void"
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 6311999
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
-              "key": {
-                "ledger_key_nonce": {
-                  "nonce": "4837995959683129791"
+                  "nonce": "8370022561469687789"
                 }
               },
               "durability": "temporary",
@@ -349,42 +388,12 @@
                       "key": {
                         "vec": [
                           {
-                            "symbol": "ClientApproval"
-                          },
-                          {
-                            "u32": 1
-                          }
-                        ]
-                      },
-                      "val": {
-                        "bool": true
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
                             "symbol": "Freelancer"
                           }
                         ]
                       },
                       "val": {
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
-                            "symbol": "FreelancerApproval"
-                          },
-                          {
-                            "u32": 1
-                          }
-                        ]
-                      },
-                      "val": {
-                        "bool": true
                       }
                     },
                     {
@@ -403,55 +412,86 @@
                       "key": {
                         "vec": [
                           {
-                            "symbol": "Milestones"
+                            "symbol": "Milestone"
+                          },
+                          {
+                            "u32": 1
+                          }
+                        ]
+                      },
+                      "val": {
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "amount"
+                            },
+                            "val": {
+                              "i128": "100"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "client_approved"
+                            },
+                            "val": {
+                              "bool": true
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "deadline"
+                            },
+                            "val": {
+                              "u64": "0"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "description"
+                            },
+                            "val": {
+                              "string": "Work"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "freelancer_approved"
+                            },
+                            "val": {
+                              "bool": true
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "id"
+                            },
+                            "val": {
+                              "u32": 1
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "status"
+                            },
+                            "val": {
+                              "u32": 4
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "MilestoneIds"
                           }
                         ]
                       },
                       "val": {
                         "vec": [
                           {
-                            "map": [
-                              {
-                                "key": {
-                                  "symbol": "amount"
-                                },
-                                "val": {
-                                  "i128": "100"
-                                }
-                              },
-                              {
-                                "key": {
-                                  "symbol": "deadline"
-                                },
-                                "val": {
-                                  "u64": "0"
-                                }
-                              },
-                              {
-                                "key": {
-                                  "symbol": "description"
-                                },
-                                "val": {
-                                  "string": "Milestone"
-                                }
-                              },
-                              {
-                                "key": {
-                                  "symbol": "id"
-                                },
-                                "val": {
-                                  "u32": 1
-                                }
-                              },
-                              {
-                                "key": {
-                                  "symbol": "status"
-                                },
-                                "val": {
-                                  "u32": 3
-                                }
-                              }
-                            ]
+                            "u32": 1
                           }
                         ]
                       }
