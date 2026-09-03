@@ -50,7 +50,8 @@ fn test_create_dispute() {
 
     env.ledger().set_timestamp(1000);
     
-    let dispute_id = client.create_dispute(&title, &description, &duration, &disputed_amount, &winner, &loser);
+    let dispute_id = client.create_dispute(&caller, &title, &description, 
+&duration, &disputed_amount, &winner, &loser);
     
     assert_eq!(dispute_id, 0);
     assert_eq!(client.get_dispute_count(), 1);
@@ -94,7 +95,8 @@ fn test_voting_and_resolving() {
     let desc = String::from_str(&env, "Desc");
     
     env.ledger().set_timestamp(1000);
-    let dispute_id = client.create_dispute(&title, &desc, &100, &disputed_amount, &winner, &loser);
+    let dispute_id = client.create_dispute(&caller, &title, &desc, &100, 
+&disputed_amount, &winner, &loser);
 
     client.vote(&voter1, &dispute_id, &1000, &true);
     client.vote(&voter2, &dispute_id, &500, &false);
@@ -106,7 +108,7 @@ fn test_voting_and_resolving() {
     // Fast forward to after deadline
     env.ledger().set_timestamp(1101);
 
-    let is_resolved_in_favor = client.resolve(&dispute_id);
+    let is_resolved_in_favor = client.resolve(&caller, &dispute_id);
     assert_eq!(is_resolved_in_favor, true); // votes_for > votes_against
 
     let dispute_final = client.get_dispute(&dispute_id);
@@ -130,9 +132,10 @@ fn test_voting_and_resolving() {
 fn test_vote_after_deadline() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let contract_id = env.register_contract(None, DisputeContract);
     let client = DisputeContractClient::new(&env, &contract_id);
+
     let token_admin = Address::generate(&env);
     let token = create_token_contract(&env, &token_admin);
 
@@ -143,16 +146,18 @@ fn test_vote_after_deadline() {
     token_admin_client.mint(&voter, &100);
 
     env.ledger().set_timestamp(1000);
+
     let dispute_id = client.create_dispute(
-        &String::from_str(&env, "title"), 
-        &String::from_str(&env, "desc"), 
-        &100, 
-        &0, 
-        &Address::generate(&env), 
-        &Address::generate(&env)
+        &voter,
+        &String::from_str(&env, "title"),
+        &String::from_str(&env, "desc"),
+        &100,
+        &100,
+        &Address::generate(&env),
+        &Address::generate(&env),
     );
 
-    env.ledger().set_timestamp(1101); // Past deadline
-    
-    client.vote(&voter, &dispute_id, &100, &true); // Should panic with VotingEnded (6)
+    env.ledger().set_timestamp(1101);
+
+    client.vote(&voter, &dispute_id, &100, &true);
 }

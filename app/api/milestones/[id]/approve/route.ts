@@ -55,9 +55,28 @@ export const POST = withAnyRbac(['milestone:approve', 'milestone:reject'], async
         status           = ${newStatus},
         approved_at      = ${action === 'approve' ? sql`NOW()` : null},
         rejection_reason = ${action === 'reject' ? rejection_reason : null},
+        last_reviewed_at = NOW(),
+        last_reviewed_by = ${auth.userId},
         updated_at       = NOW()
       WHERE id = ${id}
       RETURNING *
+    `
+
+    // Record in submission history
+    await sql`
+      INSERT INTO milestone_submission_history (
+        milestone_id,
+        submission_type,
+        submitted_by,
+        reviewed_by,
+        feedback
+      ) VALUES (
+        ${id},
+        ${action === 'approve' ? 'approved' : 'rejected'},
+        ${milestone.freelancer_id},
+        ${auth.userId},
+        ${action === 'reject' ? rejection_reason : body.approval_notes || null}
+      )
     `
 
     activityService.log({

@@ -5,6 +5,7 @@ import { withAuth } from '@/lib/auth/middleware'
 import { sql } from '@/lib/db'
 import { CreateMilestoneSchema } from '@/lib/validations'
 import { activityService } from '@/lib/activity'
+import { contractAuditLogService } from '@/lib/audit-log'
 
 export const POST = withAuth(async (request: NextRequest, auth) => {
   let body: unknown
@@ -59,6 +60,20 @@ export const POST = withAuth(async (request: NextRequest, auth) => {
       description: `Milestone "${title}" created with amount ${amount} ${currency}`,
       metadata: { amount, currency, sort_order },
     }).catch((err: unknown) => console.error('[activity] Failed to log milestone_created:', err))
+
+    // Audit log: milestone_creation (only if milestone is linked to a contract)
+    if (milestone.contract_id) {
+      contractAuditLogService.createLog({
+        contractId: milestone.contract_id,
+        projectId: project_id,
+        action: 'milestone_creation',
+        actorUserId: user.id,
+        actorWallet: auth.walletAddress,
+        milestoneId: milestone.id,
+        newState: 'pending',
+        metadata: { title, amount, currency, sort_order },
+      }, auth.walletAddress).catch((err: unknown) => console.error('[audit-log] Failed to log milestone_creation:', err))
+    }
 
     return NextResponse.json({ milestone }, { status: 201 })
   } catch {

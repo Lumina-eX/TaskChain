@@ -3,6 +3,7 @@
 import { CheckCircle2, Clock, AlertCircle, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import Link from "next/link";
 
 export interface ContractMilestone {
   id: string;
@@ -85,8 +86,10 @@ export function ContractMilestoneList({ milestones, isLoading }: { milestones: C
                   {config.label}
                 </p>
               </div>
-              <Button variant="ghost" size="icon" className="shrink-0">
-                <ChevronRight className="h-4 w-4" />
+              <Button variant="ghost" size="icon" className="shrink-0" asChild>
+                <Link href={`/dashboard/milestones/${m.id}`}>
+                  <ChevronRight className="h-4 w-4" />
+                </Link>
               </Button>
             </div>
           </div>

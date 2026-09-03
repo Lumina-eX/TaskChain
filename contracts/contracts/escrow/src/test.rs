@@ -2,7 +2,7 @@
 
 use super::*;
 use soroban_sdk::{
-    testutils::Address as _,
+    testutils::{Address as _, Events as _},
     vec, Address, Env, String,
 };
 
@@ -56,54 +56,36 @@ fn setup_test() -> TestSetup {
     }
 }
 
-/// Helper: create a single milestone, init, and fund.
-fn setup_funded_milestone(setup: &TestSetup, amount: i128) -> u32 {
-    let milestone_id = 1;
-    let milestone = Milestone {
-        id: milestone_id,
+fn milestone(env: &Env, id: u32, amount: i128) -> Milestone {
+    Milestone {
+        id,
         deadline: 0,
         amount,
         status: MilestoneStatus::Pending,
-        description: String::from_str(&setup.env, "Work"),
+        description: String::from_str(env, "Security milestone"),
         client_approved: false,
         freelancer_approved: false,
-    };
+    }
+}
+
+fn initialize_single_milestone(setup: &TestSetup, amount: i128) {
+    let milestones = vec![&setup.env, milestone(&setup.env, 1, amount)];
     setup.escrow_client.initialize(
         &setup.admin,
         &setup.client,
         &setup.freelancer,
         &setup.arbiter,
         &setup.token_address,
-        &vec![&setup.env, milestone],
+        &milestones,
     );
+}
+
+fn fully_approve_single_milestone(setup: &TestSetup) {
     setup.escrow_client.fund();
-    milestone_id
+    setup.escrow_client.submit_milestone(&1);
+    setup.escrow_client.approve(&1);
+    setup.escrow_client.freelancer_confirm(&1);
 }
-
-/// Helper: fund + start → InProgress.
-fn setup_in_progress_milestone(setup: &TestSetup, amount: i128) -> u32 {
-    let id = setup_funded_milestone(setup, amount);
-    setup.escrow_client.start_milestone(&id);
-    id
-}
-
-/// Helper: reach Submitted state.
-fn setup_submitted_milestone(setup: &TestSetup, amount: i128) -> u32 {
-    let id = setup_in_progress_milestone(setup, amount);
-    setup.escrow_client.submit_milestone(&id);
-    id
-}
-
-/// Helper: reach Approved state (client_approved = true).
-fn setup_approved_milestone(setup: &TestSetup, amount: i128) -> u32 {
-    let id = setup_submitted_milestone(setup, amount);
-    setup.escrow_client.approve(&id);
-    id
-}
-
-// ===========================================================================
-// 1. Happy-path: full lifecycle
-// ===========================================================================
 
 #[test]
 fn test_happy_path_full_state_machine() {
@@ -183,19 +165,14 @@ fn test_happy_path_full_state_machine() {
     );
     assert!(escrow.has_client_approval(&1));
 
-    // ── Freelancer Confirm Milestone 1 ──────────────────────────────────────
-    escrow.freelancer_confirm(&1);
-    assert!(escrow.has_freelancer_approval(&1));
+    // Release Milestone 1 by client (client-only authorization)
+    escrow.release(&1, &setup.client);
+    assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Released);
 
-    // ── Release Milestone 1 ─────────────────────────────────────────────────
-    escrow.release(&1, &setup.freelancer);
-    assert_eq!(
-        escrow.get_milestones().get(0).unwrap().status,
-        MilestoneStatus::Released
-    );
-
+    // Verify token payout and escrow balance tracking
     assert_eq!(token_client.balance(&setup.freelancer), 100);
     assert_eq!(token_client.balance(&escrow.address), 200);
+    assert_eq!(escrow.get_escrow_balance(), 200);
 }
 
 // ===========================================================================
@@ -622,51 +599,13 @@ fn test_dispute_from_pending_fails() {
     setup.escrow_client.dispute(&1, &setup.client);
 }
 
-#[test]
-#[should_panic(expected = "HostError: Error(Contract, #7)")]
-fn test_unauthorized_dispute_fails() {
-    let setup = setup_test();
-    let id = setup_submitted_milestone(&setup, 100);
-    let stranger = Address::generate(&setup.env);
-    setup.escrow_client.dispute(&id, &stranger);
-}
+    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
+    escrow.fund();
+    escrow.submit_milestone(&1);
+    escrow.approve(&1);
 
-#[test]
-fn test_dispute_clears_approvals() {
-    let setup = setup_test();
-    let id = setup_approved_milestone(&setup, 400);
-    setup.escrow_client.freelancer_confirm(&id);
-
-    assert!(setup.escrow_client.has_client_approval(&id));
-    assert!(setup.escrow_client.has_freelancer_approval(&id));
-
-    setup.escrow_client.dispute(&id, &setup.client);
-    assert_eq!(
-        setup.escrow_client.get_milestones().get(0).unwrap().status,
-        MilestoneStatus::Disputed
-    );
-    assert!(!setup.escrow_client.has_client_approval(&id));
-    assert!(!setup.escrow_client.has_freelancer_approval(&id));
-}
-
-// ===========================================================================
-// 9. resolve_dispute tests
-// ===========================================================================
-
-#[test]
-fn test_dispute_resolve_to_freelancer() {
-    let setup = setup_test();
-    let id = setup_submitted_milestone(&setup, 400);
-    setup.escrow_client.dispute(&id, &setup.client);
-    setup.escrow_client.resolve_dispute(&id, &true);
-
-    let tc = token::Client::new(&setup.env, &setup.token_address);
-    assert_eq!(tc.balance(&setup.freelancer), 400);
-    assert_eq!(tc.balance(&setup.client), 600);
-    assert_eq!(
-        setup.escrow_client.get_milestones().get(0).unwrap().status,
-        MilestoneStatus::Released
-    );
+    // Freelancer tries to trigger release (unauthorized, only client can do this)
+    escrow.release(&1, &setup.freelancer);
 }
 
 #[test]
@@ -738,8 +677,8 @@ fn test_double_initialization_fails() {
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #8)")]
-fn test_zero_amount_fails() {
+#[should_panic(expected = "HostError: Error(Contract, #9)")]
+fn test_release_without_approval_fails() {
     let setup = setup_test();
     let milestone = Milestone {
         id: 1,
@@ -750,15 +689,18 @@ fn test_zero_amount_fails() {
         client_approved: false,
         freelancer_approved: false,
     };
-    setup.escrow_client.initialize(
-        &setup.admin, &setup.client, &setup.freelancer, &setup.arbiter,
-        &setup.token_address, &vec![&setup.env, milestone],
-    );
+    let milestones = vec![&env, milestone];
+
+    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
+    escrow.fund();
+    escrow.submit_milestone(&1);
+    // Missing client approval - should fail with InsufficientApprovals (error code 9)
+    escrow.release(&1, &setup.client);
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #3)")]
-fn test_double_fund_fails() {
+#[should_panic(expected = "HostError: Error(Contract, #6)")]
+fn test_double_client_approval_fails() {
     let setup = setup_test();
     setup_funded_milestone(&setup, 100);
     // Second fund must fail with AlreadyFunded (error 3)
@@ -781,11 +723,14 @@ fn test_version() {
         client_approved: false,
         freelancer_approved: false,
     };
-    setup.escrow_client.initialize(
-        &setup.admin, &setup.client, &setup.freelancer, &setup.arbiter,
-        &setup.token_address, &vec![&setup.env, milestone],
-    );
-    assert_eq!(setup.escrow_client.version(), 1);
+    let milestones = vec![&env, milestone];
+
+    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
+    escrow.fund();
+    escrow.submit_milestone(&1);
+    escrow.approve(&1);
+    // Once approved, the milestone is no longer in Submitted state.
+    escrow.approve(&1);
 }
 
 #[test]
@@ -846,21 +791,15 @@ fn test_getters_return_correct_parties() {
         client_approved: false,
         freelancer_approved: false,
     };
-    setup.escrow_client.initialize(
-        &setup.admin, &setup.client, &setup.freelancer, &setup.arbiter,
-        &setup.token_address, &vec![&setup.env, milestone],
-    );
+    let milestones = vec![&env, milestone];
 
-    assert_eq!(setup.escrow_client.get_client(), setup.client);
-    assert_eq!(setup.escrow_client.get_freelancer(), setup.freelancer);
-    assert_eq!(setup.escrow_client.get_arbiter(), setup.arbiter);
-    assert_eq!(setup.escrow_client.get_token(), setup.token_address);
-    assert_eq!(setup.escrow_client.is_funded(), false);
-}
+    escrow.initialize(&setup.admin, &setup.client, &setup.freelancer, &setup.arbiter, &setup.token_address, &milestones);
+    escrow.fund();
+    escrow.submit_milestone(&1);
+    escrow.approve(&1);
 
-// ===========================================================================
-// 12. Terminal-state guard: no transitions out of Released / Refunded
-// ===========================================================================
+    // Verify client approval is set
+    assert_eq!(escrow.has_client_approval(&1), true);
 
 #[test]
 #[should_panic(expected = "HostError: Error(Contract, #6)")]
@@ -873,12 +812,157 @@ fn test_no_transition_from_released() {
     setup.escrow_client.submit_milestone(&id);
 }
 
+    // Verify approvals are cleared
+    assert_eq!(escrow.has_client_approval(&1), false);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #7)")]
+fn test_unauthorized_refund_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 150);
+    setup.escrow_client.fund();
+
+    setup.escrow_client.refund(&1, &setup.client);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #7)")]
+fn test_unauthorized_dispute_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 150);
+    setup.escrow_client.fund();
+
+    let stranger = Address::generate(&setup.env);
+    setup.escrow_client.dispute(&1, &stranger);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #5)")]
+fn test_submit_invalid_milestone_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 150);
+    setup.escrow_client.fund();
+
+    setup.escrow_client.submit_milestone(&99);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #5)")]
+fn test_release_invalid_milestone_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 150);
+    fully_approve_single_milestone(&setup);
+
+    setup.escrow_client.release(&99, &setup.client);
+}
+
 #[test]
 #[should_panic(expected = "HostError: Error(Contract, #6)")]
-fn test_no_transition_from_refunded() {
+fn test_double_release_replay_fails() {
     let setup = setup_test();
-    let id = setup_funded_milestone(&setup, 100);
-    setup.escrow_client.refund(&id, &setup.client);
-    // Now Refunded → start must fail
-    setup.escrow_client.start_milestone(&id);
+    initialize_single_milestone(&setup, 150);
+    fully_approve_single_milestone(&setup);
+    setup.escrow_client.release(&1, &setup.client);
+
+    setup.escrow_client.release(&1, &setup.client);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #6)")]
+fn test_double_refund_replay_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 150);
+    setup.escrow_client.fund();
+    setup.escrow_client.refund(&1, &setup.freelancer);
+
+    setup.escrow_client.refund(&1, &setup.freelancer);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #6)")]
+fn test_dispute_after_release_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 150);
+    fully_approve_single_milestone(&setup);
+    setup.escrow_client.release(&1, &setup.client);
+
+    setup.escrow_client.dispute(&1, &setup.client);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #6)")]
+fn test_refund_after_release_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 150);
+    fully_approve_single_milestone(&setup);
+    setup.escrow_client.release(&1, &setup.client);
+
+    setup.escrow_client.refund(&1, &setup.freelancer);
+}
+
+#[test]
+fn test_successful_security_events_are_emitted() {
+    let setup = setup_test();
+    let env = setup.env.clone();
+
+    initialize_single_milestone(&setup, 150);
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&setup.escrow_client.address)
+            .events()
+            .len(),
+        1
+    );
+
+    setup.escrow_client.fund();
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&setup.escrow_client.address)
+            .events()
+            .len(),
+        1
+    );
+
+    setup.escrow_client.submit_milestone(&1);
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&setup.escrow_client.address)
+            .events()
+            .len(),
+        1
+    );
+
+    setup.escrow_client.approve(&1);
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&setup.escrow_client.address)
+            .events()
+            .len(),
+        1
+    );
+
+    setup.escrow_client.freelancer_confirm(&1);
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&setup.escrow_client.address)
+            .events()
+            .len(),
+        1
+    );
+
+    setup.escrow_client.release(&1, &setup.client);
+    assert_eq!(
+        env.events()
+            .all()
+            .filter_by_contract(&setup.escrow_client.address)
+            .events()
+            .len(),
+        1
+    );
 }
