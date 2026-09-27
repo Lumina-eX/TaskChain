@@ -484,6 +484,11 @@ impl EscrowContract {
             return Err(Error::InvalidMilestoneStatus);
         }
 
+        // Funds cannot be released once the milestone deadline has elapsed.
+        if milestone.deadline > 0 && env.ledger().timestamp() > milestone.deadline {
+            return Err(Error::DeadlineExceeded);
+        }
+
         // While a dispute is open the escrowed funds are frozen: `release` must be
         // blocked until the arbitrator resolves the dispute.
         if milestone.status == MilestoneStatus::Disputed {
