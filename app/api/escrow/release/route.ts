@@ -4,6 +4,9 @@
  * Release funds for an approved milestone to the freelancer.
  * Only the contract client can trigger a release.
  *
+ * Idempotency:
+ *   Requires an "Idempotency-Key" header (or `idempotencyKey` body field).
+ *
  * Body:
  *   contractId   string (UUID)
  *   milestoneId  string (UUID)
@@ -11,20 +14,15 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { withRbac, RbacContext } from '@/lib/auth/rbacMiddleware'
+import { withIdempotency } from '@/lib/idempotency'
 import { escrowService, EscrowError, escrowErrorToHttpStatus } from '@/lib/escrow'
 import { dispatchNotification } from '@/lib/notifications'
 
-export const POST = withRbac('escrow:release', async (request: NextRequest, auth: RbacContext) => {
-  let body: Record<string, unknown>
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json(
-      { error: 'Request body must be valid JSON', code: 'INVALID_JSON' },
-      { status: 400 }
-    )
-  }
-
+export const POST = withRbac('escrow:release', withIdempotency('escrow_release', async (
+  _request: NextRequest,
+  auth: RbacContext,
+  body: Record<string, unknown>
+) => {
   try {
     const result = await escrowService.releaseFunds({
       contractId: body.contractId as string,
@@ -73,4 +71,4 @@ export const POST = withRbac('escrow:release', async (request: NextRequest, auth
       { status: 500 }
     )
   }
-})
+}))

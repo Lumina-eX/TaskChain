@@ -12,6 +12,7 @@ import { ContractMilestoneList, type ContractMilestone } from "@/components/dash
 import { ContractEscrowSummary } from "@/components/dashboard/contract-escrow-summary";
 import { EscrowStatusTracker, type EscrowStage } from "@/components/dashboard/escrow-status-tracker";
 import { EscrowFundingDialog } from "@/components/dashboard/escrow-funding-dialog";
+import { ActivityTimeline } from "@/components/ActivityTimeline";
 
 interface ProfileInfo {
   display_name: string | null;
@@ -225,6 +226,9 @@ export default function ContractDetailPage() {
             )}
           </div>
         </div>
+
+        {/* Contract Activity Timeline */}
+        <ActivityTimeline contractId={contract.id} />
       </div>
 
       {/* Escrow Funding Dialog */}

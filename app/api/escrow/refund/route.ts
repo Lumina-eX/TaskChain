@@ -4,6 +4,9 @@
  * Refund all remaining escrowed funds back to the client.
  * Can be triggered by the client (voluntary cancellation) or an admin.
  *
+ * Idempotency:
+ *   Requires an "Idempotency-Key" header (or `idempotencyKey` body field).
+ *
  * Body:
  *   contractId  string (UUID)
  *   reason      string
@@ -11,20 +14,17 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { withAnyRbac, RbacContext } from '@/lib/auth/rbacMiddleware'
+import { withIdempotency } from '@/lib/idempotency'
 import { escrowService, EscrowError, escrowErrorToHttpStatus } from '@/lib/escrow'
 import { dispatchNotification } from '@/lib/notifications'
 
-export const POST = withAnyRbac(['escrow:refund', 'admin:contracts_freeze'], async (request: NextRequest, auth: RbacContext) => {
-  let body: Record<string, unknown>
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json(
-      { error: 'Request body must be valid JSON', code: 'INVALID_JSON' },
-      { status: 400 }
-    )
-  }
-
+export const POST = withAnyRbac(
+  ['escrow:refund', 'admin:contracts_freeze'],
+  withIdempotency('escrow_refund', async (
+    _request: NextRequest,
+    auth: RbacContext,
+    body: Record<string, unknown>
+  ) => {
   try {
     const result = await escrowService.refundEscrow({
       contractId: body.contractId as string,
@@ -68,4 +68,5 @@ export const POST = withAnyRbac(['escrow:refund', 'admin:contracts_freeze'], asy
       { status: 500 }
     )
   }
-})
+  })
+)

@@ -4,6 +4,12 @@
  * Deploy a new escrow contract for a project.
  * The authenticated user must be the client (project owner).
  *
+ * Idempotency:
+ *   Requires an "Idempotency-Key" header (or `idempotencyKey` body field) —
+ *   a UUID or cryptographically random hash. Repeating the request with the
+ *   same key returns the original response instead of deploying a second
+ *   contract.
+ *
  * Body:
  *   projectId            string (UUID)
  *   freelancerId         string (UUID)
@@ -15,8 +21,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { withAuth } from '@/lib/auth/middleware'
+import { withAuth, AuthContext } from '@/lib/auth/middleware'
 import { sql } from '@/lib/db'
+import { withIdempotency } from '@/lib/idempotency'
 import {
   escrowService,
   EscrowError,
@@ -24,17 +31,11 @@ import {
   EscrowAlreadyExistsError,
 } from '@/lib/escrow'
 
-export const POST = withAuth(async (request: NextRequest, auth) => {
-  let body: Record<string, unknown>
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json(
-      { error: 'Request body must be valid JSON', code: 'INVALID_JSON' },
-      { status: 400 }
-    )
-  }
-
+export const POST = withAuth(withIdempotency('escrow_create', async (
+  _request: NextRequest,
+  auth: AuthContext,
+  body: Record<string, unknown>
+) => {
   // --- Resolve authenticated wallet to a DB user ---
   const users = await sql`
     SELECT id FROM users WHERE wallet_address = ${auth.walletAddress} LIMIT 1
@@ -103,4 +104,4 @@ export const POST = withAuth(async (request: NextRequest, auth) => {
       { status: 500 }
     )
   }
-})
+}))

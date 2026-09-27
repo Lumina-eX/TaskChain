@@ -4,6 +4,9 @@
  * Record that the client has funded the escrow contract on-chain.
  * Verifies the funding transaction before updating state.
  *
+ * Idempotency:
+ *   Requires an "Idempotency-Key" header (or `idempotencyKey` body field).
+ *
  * Body:
  *   contractId    string (UUID)
  *   fundingTxHash string  — on-chain transaction hash
@@ -12,21 +15,15 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { withRbac, RbacContext } from '@/lib/auth/rbacMiddleware'
-import { sql } from '@/lib/db'
+import { withIdempotency } from '@/lib/idempotency'
 import { escrowService, EscrowError, escrowErrorToHttpStatus } from '@/lib/escrow'
 import { dispatchNotification } from '@/lib/notifications'
 
-export const POST = withRbac('escrow:fund', async (request: NextRequest, auth: RbacContext) => {
-  let body: Record<string, unknown>
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json(
-      { error: 'Request body must be valid JSON', code: 'INVALID_JSON' },
-      { status: 400 }
-    )
-  }
-
+export const POST = withRbac('escrow:fund', withIdempotency('escrow_fund', async (
+  _request: NextRequest,
+  auth: RbacContext,
+  body: Record<string, unknown>
+) => {
   try {
     const result = await escrowService.fundEscrow({
       contractId: body.contractId as string,
@@ -70,4 +67,4 @@ export const POST = withRbac('escrow:fund', async (request: NextRequest, auth: R
       { status: 500 }
     )
   }
-})
+}))

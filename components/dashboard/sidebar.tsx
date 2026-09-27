@@ -12,6 +12,7 @@ import {
   UserCircle,
   Settings,
   MessageSquare,
+  Banknote,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -41,6 +42,11 @@ const navItems = [
     label: 'Transactions',
     href: '/dashboard/transactions',
     icon: History,
+  },
+  {
+    label: 'Earnings',
+    href: '/freelancer/earnings',
+    icon: Banknote,
   },
   {
     label: 'Messages',

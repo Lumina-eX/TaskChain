@@ -84,6 +84,9 @@ export function Navbar() {
             <Link href="/freelancers" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               Browse Freelancers
             </Link>
+            <Link href="/projects" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              Browse Projects
+            </Link>
             <Link href="#features" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               Features
             </Link>
@@ -218,6 +221,9 @@ export function Navbar() {
           <div className="px-4 py-6 space-y-4">
             <Link href="/freelancers" className="block text-sm text-muted-foreground hover:text-foreground transition-colors" onClick={closeMenus}>
               Browse Freelancers
+            </Link>
+            <Link href="/projects" className="block text-sm text-muted-foreground hover:text-foreground transition-colors" onClick={closeMenus}>
+              Browse Projects
             </Link>
             <Link href="#features" className="block text-sm text-muted-foreground hover:text-foreground transition-colors" onClick={closeMenus}>
               Features
