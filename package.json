@@ -14,6 +14,7 @@
     "sync-worker": "tsx scripts/sync-worker.ts",
     "deadline-monitor": "tsx scripts/deadline-monitor.ts",
     "tx-worker": "tsx scripts/tx-recovery-worker.ts",
+    "job-worker": "tsx scripts/job-worker.ts",
     "migrate": "tsx scripts/migrate.ts",
     "idempotency:cleanup": "tsx scripts/idempotency-cleanup.ts",
     "build:production": "npm run migrate && next build",
