@@ -73,6 +73,14 @@ pub enum Error {
     DeadlineExceeded = 11,
     /// ERR_ALREADY_EXPIRED
     AlreadyExpired = 12,
+    /// ERR_DEADLINE_NOT_EXPIRED
+    DeadlineNotExpired = 13,
+    /// ERR_INVALID_DEADLINE
+    InvalidDeadline = 14,
+    /// ERR_DEADLINE_ALREADY_SET
+    DeadlineAlreadySet = 15,
+    /// ERR_MILESTONE_DISPUTED
+    MilestoneDisputed = 16,
 }
 
 /// Standardized event schemas. Topics are indexed by Soroban RPC consumers;
@@ -198,6 +206,50 @@ pub struct MilestoneExpired {
     pub actor: Address,
     pub recipient: Address,
     pub amount: i128,
+}
+
+/// Emitted when a deadline is assigned to a milestone that did not have one.
+#[contractevent]
+pub struct DeadlineSet {
+    #[topic]
+    pub contract_id: Address,
+    #[topic]
+    pub milestone_id: u32,
+    #[topic]
+    pub actor: Address,
+    pub deadline: u64,
+}
+
+/// Emitted when an existing milestone deadline is pushed further into the future.
+#[contractevent]
+pub struct DeadlineExtended {
+    #[topic]
+    pub contract_id: Address,
+    #[topic]
+    pub milestone_id: u32,
+    #[topic]
+    pub actor: Address,
+    pub old_deadline: u64,
+    pub new_deadline: u64,
+}
+
+/// Emitted when an expired milestone is acted upon after its deadline elapsed.
+#[contractevent]
+pub struct DeadlineExpired {
+    #[topic]
+    pub contract_id: Address,
+    #[topic]
+    pub milestone_id: u32,
+    #[topic]
+    pub actor: Address,
+    pub deadline: u64,
+}
+
+/// A milestone that has already paid out can no longer be modified.
+fn is_terminal_status(status: MilestoneStatus) -> bool {
+    status == MilestoneStatus::Released
+        || status == MilestoneStatus::Refunded
+        || status == MilestoneStatus::AutoExpired
 }
 
 #[contract]
@@ -367,6 +419,11 @@ impl EscrowContract {
         if milestone.status != MilestoneStatus::Submitted {
             return Err(Error::InvalidMilestoneStatus);
         }
+        // A milestone that is past its deadline can no longer be approved;
+        // it must be refunded to the client or extended by the client/arbiter.
+        if milestone.deadline > 0 && env.ledger().timestamp() > milestone.deadline {
+            return Err(Error::DeadlineExceeded);
+        }
         if milestone.client_approved {
             return Err(Error::AlreadyApproved);
         }
@@ -425,6 +482,11 @@ impl EscrowContract {
 
         if milestone.status == MilestoneStatus::Released {
             return Err(Error::InvalidMilestoneStatus);
+        }
+
+        // Funds cannot be released once the milestone deadline has elapsed.
+        if milestone.deadline > 0 && env.ledger().timestamp() > milestone.deadline {
+            return Err(Error::DeadlineExceeded);
         }
 
         // While a dispute is open the escrowed funds are frozen: `release` must be
@@ -623,9 +685,17 @@ impl EscrowContract {
         MilestoneExpired {
             contract_id: env.current_contract_address(),
             milestone_id,
-            actor: caller,
+            actor: caller.clone(),
             recipient: client,
             amount: transfer_amount,
+        }
+        .publish(&env);
+
+        DeadlineExpired {
+            contract_id: env.current_contract_address(),
+            milestone_id,
+            actor: caller,
+            deadline: milestone.deadline,
         }
         .publish(&env);
 
@@ -643,6 +713,143 @@ impl EscrowContract {
     pub fn get_milestone_deadline(env: Env, milestone_id: u32) -> Result<u64, Error> {
         let milestone: Milestone = env.storage().instance().get(&DataKey::Milestone(milestone_id)).ok_or(Error::MilestoneNotFound)?;
         Ok(milestone.deadline)
+    }
+
+    /// Assign a deadline to a milestone that was created without one (deadline == 0).
+    /// Only the client or the arbiter may call this; anyone else is rejected.
+    pub fn set_deadline(env: Env, milestone_id: u32, caller: Address, deadline: u64) -> Result<(), Error> {
+        caller.require_auth();
+
+        let client: Address = env.storage().instance().get(&DataKey::Client).ok_or(Error::NotInitialized)?;
+        let arbiter: Address = env.storage().instance().get(&DataKey::Arbiter).ok_or(Error::NotInitialized)?;
+        if caller != client && caller != arbiter {
+            return Err(Error::Unauthorized);
+        }
+
+        let mut milestone: Milestone = env.storage().instance().get(&DataKey::Milestone(milestone_id)).ok_or(Error::MilestoneNotFound)?;
+
+        if milestone.deadline != 0 {
+            return Err(Error::DeadlineAlreadySet);
+        }
+        if is_terminal_status(milestone.status) {
+            return Err(Error::InvalidMilestoneStatus);
+        }
+        if deadline <= env.ledger().timestamp() {
+            return Err(Error::InvalidDeadline);
+        }
+
+        milestone.deadline = deadline;
+        env.storage().instance().set(&DataKey::Milestone(milestone_id), &milestone);
+
+        DeadlineSet {
+            contract_id: env.current_contract_address(),
+            milestone_id,
+            actor: caller,
+            deadline,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Extend a milestone deadline. Only the client or the arbiter may authorize
+    /// an extension, and the new deadline must move strictly forward in time.
+    /// This is the sanctioned path for an already-expired milestone (Expired -> Extended).
+    pub fn extend_deadline(env: Env, milestone_id: u32, caller: Address, new_deadline: u64) -> Result<(), Error> {
+        caller.require_auth();
+
+        let client: Address = env.storage().instance().get(&DataKey::Client).ok_or(Error::NotInitialized)?;
+        let arbiter: Address = env.storage().instance().get(&DataKey::Arbiter).ok_or(Error::NotInitialized)?;
+        if caller != client && caller != arbiter {
+            return Err(Error::Unauthorized);
+        }
+
+        let mut milestone: Milestone = env.storage().instance().get(&DataKey::Milestone(milestone_id)).ok_or(Error::MilestoneNotFound)?;
+
+        if milestone.deadline == 0 {
+            return Err(Error::InvalidDeadline);
+        }
+        if is_terminal_status(milestone.status) {
+            return Err(Error::InvalidMilestoneStatus);
+        }
+        if new_deadline <= milestone.deadline || new_deadline <= env.ledger().timestamp() {
+            return Err(Error::InvalidDeadline);
+        }
+
+        let old_deadline = milestone.deadline;
+        milestone.deadline = new_deadline;
+        env.storage().instance().set(&DataKey::Milestone(milestone_id), &milestone);
+
+        DeadlineExtended {
+            contract_id: env.current_contract_address(),
+            milestone_id,
+            actor: caller,
+            old_deadline,
+            new_deadline,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    /// Client-initiated refund for a milestone whose deadline elapsed without a release.
+    /// Milestones locked by an open dispute are held pending arbitration instead.
+    pub fn claim_expired_refund(env: Env, milestone_id: u32, caller: Address) -> Result<(), Error> {
+        caller.require_auth();
+
+        let client: Address = env.storage().instance().get(&DataKey::Client).ok_or(Error::NotInitialized)?;
+        if caller != client {
+            return Err(Error::Unauthorized);
+        }
+
+        let mut milestone: Milestone = env.storage().instance().get(&DataKey::Milestone(milestone_id)).ok_or(Error::MilestoneNotFound)?;
+
+        if milestone.deadline == 0 {
+            return Err(Error::InvalidDeadline);
+        }
+        if env.ledger().timestamp() <= milestone.deadline {
+            return Err(Error::DeadlineNotExpired);
+        }
+        // Funds on a disputed milestone stay locked until the arbiter resolves it.
+        if milestone.status == MilestoneStatus::Disputed {
+            return Err(Error::MilestoneDisputed);
+        }
+        if milestone.status != MilestoneStatus::Funded && milestone.status != MilestoneStatus::Submitted {
+            return Err(Error::InvalidMilestoneStatus);
+        }
+
+        let transfer_amount = milestone.amount;
+        milestone.status = MilestoneStatus::Refunded;
+        env.storage().instance().set(&DataKey::Milestone(milestone_id), &milestone);
+
+        let mut balance: i128 = env.storage().instance().get(&DataKey::EscrowBalance).unwrap_or(0);
+        if balance >= transfer_amount {
+            balance -= transfer_amount;
+            env.storage().instance().set(&DataKey::EscrowBalance, &balance);
+        }
+
+        let token_address: Address = env.storage().instance().get(&DataKey::Token).ok_or(Error::NotInitialized)?;
+        let token_client = token::Client::new(&env, &token_address);
+        token_client.transfer(&env.current_contract_address(), &client, &transfer_amount);
+
+        DeadlineExpired {
+            contract_id: env.current_contract_address(),
+            milestone_id,
+            actor: caller.clone(),
+            deadline: milestone.deadline,
+        }
+        .publish(&env);
+
+        RefundIssued {
+            contract_id: env.current_contract_address(),
+            milestone_id,
+            actor: caller,
+            recipient: client,
+            amount: transfer_amount,
+        }
+        .publish(&env);
+
+        Ok(())
     }
 
     // --- State Getters ---

@@ -2,7 +2,7 @@
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Events as _},
+    testutils::{Address as _, Events as _, Ledger as _},
     vec, Address, Env, String,
 };
 
@@ -73,6 +73,41 @@ fn initialize_single_milestone(setup: &TestSetup, amount: i128) {
         &setup.token_address,
         &milestones,
     );
+}
+
+fn milestone_with_deadline(env: &Env, id: u32, amount: i128, deadline: u64) -> Milestone {
+    Milestone {
+        id,
+        deadline,
+        amount,
+        status: MilestoneStatus::Pending,
+        description: String::from_str(env, "Deadline milestone"),
+        client_approved: false,
+        freelancer_approved: false,
+    }
+}
+
+fn initialize_single_milestone_with_deadline(setup: &TestSetup, amount: i128, deadline: u64) {
+    let milestones = vec![
+        &setup.env,
+        milestone_with_deadline(&setup.env, 1, amount, deadline),
+    ];
+    setup.escrow_client.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &setup.token_address,
+        &milestones,
+    );
+}
+
+fn contract_event_count(env: &Env, client: &EscrowContractClient<'_>) -> usize {
+    env.events()
+        .all()
+        .filter_by_contract(&client.address)
+        .events()
+        .len()
 }
 
 fn fully_approve_single_milestone(setup: &TestSetup) {
@@ -621,6 +656,397 @@ fn test_successful_security_events_are_emitted() {
             .len(),
         1
     );
+}
+
+// --- Deadline: set / extend ---
+
+#[test]
+fn test_set_deadline_stores_value_and_emits_event() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 100);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    assert_eq!(escrow.get_milestone_deadline(&1), 0);
+    assert_eq!(escrow.is_milestone_expired(&1), false);
+
+    let before = contract_event_count(&env, &escrow);
+    escrow.set_deadline(&1, &setup.client, &5_000);
+    let after = contract_event_count(&env, &escrow);
+
+    assert_eq!(escrow.get_milestone_deadline(&1), 5_000);
+    assert_eq!(after, before + 1);
+    assert_eq!(escrow.is_milestone_expired(&1), false);
+
+    env.ledger().set_timestamp(5_001);
+    assert_eq!(escrow.is_milestone_expired(&1), true);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #7)")]
+fn test_set_deadline_unauthorized_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 100);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    let stranger = Address::generate(&env);
+    escrow.set_deadline(&1, &stranger, &5_000);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #14)")]
+fn test_set_deadline_in_past_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 100);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    escrow.set_deadline(&1, &setup.client, &1_000);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #15)")]
+fn test_set_deadline_twice_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 100);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    escrow.set_deadline(&1, &setup.client, &5_000);
+    escrow.set_deadline(&1, &setup.client, &6_000);
+}
+
+#[test]
+fn test_extend_deadline_by_arbiter_succeeds() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 100);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    escrow.set_deadline(&1, &setup.client, &5_000);
+    escrow.extend_deadline(&1, &setup.arbiter, &9_000);
+    assert_eq!(escrow.get_milestone_deadline(&1), 9_000);
+}
+
+#[test]
+fn test_expired_milestone_can_be_extended_then_submitted() {
+    let setup = setup_test();
+    initialize_single_milestone_with_deadline(&setup, 100, 5_000);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    escrow.fund();
+
+    env.ledger().set_timestamp(6_000);
+    assert_eq!(escrow.is_milestone_expired(&1), true);
+
+    escrow.extend_deadline(&1, &setup.arbiter, &20_000);
+    assert_eq!(escrow.get_milestone_deadline(&1), 20_000);
+    assert_eq!(escrow.is_milestone_expired(&1), false);
+
+    // After the extension the milestone is live again and can be worked on.
+    escrow.submit_milestone(&1);
+    assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Submitted);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #7)")]
+fn test_extend_deadline_unauthorized_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 100);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    escrow.set_deadline(&1, &setup.client, &5_000);
+    escrow.extend_deadline(&1, &setup.freelancer, &9_000);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #14)")]
+fn test_extend_deadline_backwards_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 100);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    escrow.set_deadline(&1, &setup.client, &5_000);
+    escrow.extend_deadline(&1, &setup.client, &4_000);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #14)")]
+fn test_extend_deadline_without_existing_deadline_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 100);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    escrow.extend_deadline(&1, &setup.client, &5_000);
+}
+
+// --- Deadline: approval / release / submission guards ---
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #11)")]
+fn test_submit_after_deadline_expired_fails() {
+    let setup = setup_test();
+    initialize_single_milestone_with_deadline(&setup, 100, 5_000);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    escrow.fund();
+
+    env.ledger().set_timestamp(5_001);
+    escrow.submit_milestone(&1);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #11)")]
+fn test_approve_after_deadline_expired_fails() {
+    let setup = setup_test();
+    initialize_single_milestone_with_deadline(&setup, 100, 5_000);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    escrow.fund();
+    escrow.submit_milestone(&1);
+
+    env.ledger().set_timestamp(5_001);
+    escrow.approve(&1);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #11)")]
+fn test_release_after_deadline_expired_fails() {
+    let setup = setup_test();
+    initialize_single_milestone_with_deadline(&setup, 100, 5_000);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    escrow.fund();
+    escrow.submit_milestone(&1);
+    escrow.approve(&1);
+
+    // Even a fully approved milestone cannot be released after expiry.
+    env.ledger().set_timestamp(5_001);
+    escrow.release(&1, &setup.client);
+}
+
+// --- Deadline: client-initiated refunds after expiry ---
+
+#[test]
+fn test_client_refund_after_expiry_when_funded_no_submission() {
+    let setup = setup_test();
+    initialize_single_milestone_with_deadline(&setup, 250, 5_000);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    escrow.fund();
+    assert_eq!(escrow.is_funded(), true);
+
+    env.ledger().set_timestamp(5_001);
+    assert_eq!(escrow.is_milestone_expired(&1), true);
+
+    let before = contract_event_count(&env, &escrow);
+    escrow.claim_expired_refund(&1, &setup.client);
+    let after = contract_event_count(&env, &escrow);
+
+    // DeadlineExpired + RefundIssued
+    assert_eq!(after, before + 2);
+    assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Refunded);
+
+    let token_client = token::Client::new(&env, &setup.token_address);
+    assert_eq!(token_client.balance(&setup.client), 1000);
+    assert_eq!(token_client.balance(&escrow.address), 0);
+    assert_eq!(escrow.get_escrow_balance(), 0);
+}
+
+#[test]
+fn test_client_refund_after_expiry_when_submitted() {
+    let setup = setup_test();
+    initialize_single_milestone_with_deadline(&setup, 150, 5_000);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    escrow.fund();
+    escrow.submit_milestone(&1);
+
+    env.ledger().set_timestamp(5_001);
+    escrow.claim_expired_refund(&1, &setup.client);
+
+    assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Refunded);
+    let token_client = token::Client::new(&env, &setup.token_address);
+    assert_eq!(token_client.balance(&setup.client), 1000);
+    assert_eq!(token_client.balance(&escrow.address), 0);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #13)")]
+fn test_client_refund_before_expiry_fails() {
+    let setup = setup_test();
+    initialize_single_milestone_with_deadline(&setup, 100, 5_000);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    escrow.fund();
+    escrow.claim_expired_refund(&1, &setup.client);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #7)")]
+fn test_client_refund_unauthorized_fails() {
+    let setup = setup_test();
+    initialize_single_milestone_with_deadline(&setup, 100, 5_000);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    escrow.fund();
+
+    env.ledger().set_timestamp(5_001);
+    escrow.claim_expired_refund(&1, &setup.freelancer);
+}
+
+// --- Deadline: disputes after expiry keep funds locked ---
+
+#[test]
+fn test_dispute_can_be_raised_after_expiry() {
+    let setup = setup_test();
+    initialize_single_milestone_with_deadline(&setup, 400, 5_000);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    escrow.fund();
+    escrow.submit_milestone(&1);
+
+    env.ledger().set_timestamp(6_000);
+    assert_eq!(escrow.is_milestone_expired(&1), true);
+
+    escrow.dispute(&1, &setup.client);
+    assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Disputed);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #16)")]
+fn test_claim_refund_locked_when_disputed_after_expiry() {
+    let setup = setup_test();
+    initialize_single_milestone_with_deadline(&setup, 400, 5_000);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    escrow.fund();
+    escrow.submit_milestone(&1);
+
+    env.ledger().set_timestamp(6_000);
+    escrow.dispute(&1, &setup.client);
+    // Refund is blocked while the dispute is open; the arbiter must resolve it.
+    escrow.claim_expired_refund(&1, &setup.client);
+}
+
+#[test]
+fn test_arbiter_resolves_dispute_raised_after_expiry() {
+    let setup = setup_test();
+    initialize_single_milestone_with_deadline(&setup, 400, 5_000);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    escrow.fund();
+    escrow.submit_milestone(&1);
+
+    env.ledger().set_timestamp(6_000);
+    escrow.dispute(&1, &setup.freelancer);
+    escrow.resolve_dispute(&1, &false);
+
+    assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Refunded);
+    let token_client = token::Client::new(&env, &setup.token_address);
+    assert_eq!(token_client.balance(&setup.client), 1000);
+    assert_eq!(escrow.get_escrow_balance(), 0);
+}
+
+// --- Deadline: multiple simultaneous expiries + auto expiry event ---
+
+#[test]
+fn test_multiple_milestones_expiring_simultaneously() {
+    let setup = setup_test();
+    let env = setup.env.clone();
+
+    let milestones = vec![
+        &env,
+        milestone_with_deadline(&env, 1, 100, 5_000),
+        milestone_with_deadline(&env, 2, 200, 5_000),
+    ];
+    setup.escrow_client.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &setup.token_address,
+        &milestones,
+    );
+    let escrow = setup.escrow_client;
+
+    env.ledger().set_timestamp(1_000);
+    escrow.fund();
+    assert_eq!(escrow.get_escrow_balance(), 300);
+
+    env.ledger().set_timestamp(5_001);
+    assert_eq!(escrow.is_milestone_expired(&1), true);
+    assert_eq!(escrow.is_milestone_expired(&2), true);
+
+    escrow.claim_expired_refund(&1, &setup.client);
+    escrow.claim_expired_refund(&2, &setup.client);
+
+    let stored = escrow.get_milestones();
+    assert_eq!(stored.get(0).unwrap().status, MilestoneStatus::Refunded);
+    assert_eq!(stored.get(1).unwrap().status, MilestoneStatus::Refunded);
+    assert_eq!(escrow.get_escrow_balance(), 0);
+
+    let token_client = token::Client::new(&env, &setup.token_address);
+    assert_eq!(token_client.balance(&setup.client), 1000);
+    assert_eq!(token_client.balance(&escrow.address), 0);
+}
+
+#[test]
+fn test_auto_expire_emits_deadline_expired() {
+    let setup = setup_test();
+    initialize_single_milestone_with_deadline(&setup, 150, 5_000);
+    let escrow = setup.escrow_client;
+    let env = setup.env.clone();
+
+    env.ledger().set_timestamp(1_000);
+    escrow.fund();
+
+    env.ledger().set_timestamp(6_000);
+    // View calls emit no events, so this resets the observed event list.
+    assert_eq!(escrow.is_milestone_expired(&1), true);
+    escrow.auto_expire(&setup.client, &1);
+
+    // MilestoneExpired + DeadlineExpired
+    assert_eq!(contract_event_count(&env, &escrow), 2);
+    assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::AutoExpired);
+
+    let token_client = token::Client::new(&env, &setup.token_address);
+    assert_eq!(token_client.balance(&setup.client), 1000);
+    assert_eq!(escrow.get_escrow_balance(), 0);
 }
 
 // --- Dispute escrow mechanism edge cases (issue #220) ---
