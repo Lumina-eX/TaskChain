@@ -651,6 +651,8 @@ fn test_arbiter_can_raise_dispute() {
     let setup = setup_test();
     initialize_single_milestone(&setup, 150);
     setup.escrow_client.fund();
+    // #189 state machine: a funded milestone must be started (Funded ->
+    // InProgress) before it can be submitted.
     setup.escrow_client.start_milestone(&1);
     setup.escrow_client.submit_milestone(&1);
 
@@ -669,6 +671,8 @@ fn test_release_blocked_while_disputed() {
     let setup = setup_test();
     initialize_single_milestone(&setup, 150);
     setup.escrow_client.fund();
+    // #189 state machine: a funded milestone must be started (Funded ->
+    // InProgress) before it can be submitted.
     setup.escrow_client.start_milestone(&1);
     setup.escrow_client.submit_milestone(&1);
     setup.escrow_client.approve(&1);
@@ -684,6 +688,8 @@ fn test_refund_blocked_while_disputed() {
     let setup = setup_test();
     initialize_single_milestone(&setup, 150);
     setup.escrow_client.fund();
+    // #189 state machine: a funded milestone must be started (Funded ->
+    // InProgress) before it can be submitted.
     setup.escrow_client.start_milestone(&1);
     setup.escrow_client.submit_milestone(&1);
     setup.escrow_client.dispute(&1, &setup.freelancer);
@@ -698,6 +704,8 @@ fn test_multiple_disputes_rejected() {
     let setup = setup_test();
     initialize_single_milestone(&setup, 150);
     setup.escrow_client.fund();
+    // #189 state machine: a funded milestone must be started (Funded ->
+    // InProgress) before it can be submitted.
     setup.escrow_client.start_milestone(&1);
     setup.escrow_client.submit_milestone(&1);
 
@@ -714,6 +722,8 @@ fn test_resolve_without_dispute_fails() {
     let setup = setup_test();
     initialize_single_milestone(&setup, 150);
     setup.escrow_client.fund();
+    // #189 state machine: a funded milestone must be started (Funded ->
+    // InProgress) before it can be submitted.
     setup.escrow_client.start_milestone(&1);
     setup.escrow_client.submit_milestone(&1);
 
@@ -727,6 +737,8 @@ fn test_dispute_events_are_emitted() {
 
     initialize_single_milestone(&setup, 150);
     setup.escrow_client.fund();
+    // #189 state machine: a funded milestone must be started (Funded ->
+    // InProgress) before it can be submitted.
     setup.escrow_client.start_milestone(&1);
     setup.escrow_client.submit_milestone(&1);
 
