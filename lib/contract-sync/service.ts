@@ -85,6 +85,11 @@ export class ContractSyncService {
     return this.listener
   }
 
+  /** Applies one Soroban event through the existing sync path. */
+  async applyEvent(payload: SorobanEventPayload): Promise<void> {
+    await this.processSync({ id: buildSyncDedupeKey(payload), payload })
+  }
+
   private async onEvent(payload: SorobanEventPayload): Promise<void> {
     const dedupeKey = buildSyncDedupeKey(payload)
 
