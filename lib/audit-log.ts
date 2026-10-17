@@ -12,6 +12,9 @@ export const contractAuditActions = [
   'dispute_creation',
   'dispute_resolution',
   'contract_completion',
+  'proposal_shortlisted',
+  'proposal_accepted',
+  'proposal_rejected',
 ] as const
 export type ContractAuditAction = (typeof contractAuditActions)[number]
 
@@ -27,6 +30,7 @@ export interface ContractAuditLog {
   milestoneId: number | null
   disputeId: number | null
   amount: string | null
+  proposalId: number | null
   metadata: Record<string, unknown>
   createdAt: string
 }
@@ -42,6 +46,7 @@ export interface CreateAuditLogInput {
   milestoneId?: number
   disputeId?: number
   amount?: string
+  proposalId?: number
   metadata?: Record<string, unknown>
 }
 
@@ -72,6 +77,7 @@ const createLogSchema = z.object({
   milestoneId: z.number().int().positive().optional(),
   disputeId: z.number().int().positive().optional(),
   amount: amountSchema.optional(),
+  proposalId: z.number().int().positive().optional(),
   metadata: z.record(z.unknown()).optional(),
 })
 
@@ -110,6 +116,7 @@ function rowToLog(row: Record<string, unknown>): ContractAuditLog {
     milestoneId: (row.milestone_id as number) ?? null,
     disputeId: (row.dispute_id as number) ?? null,
     amount: row.amount != null ? String(row.amount) : null,
+    proposalId: (row.proposal_id as number) ?? null,
     metadata: (row.metadata as Record<string, unknown>) ?? {},
     createdAt: row.created_at as string,
   }
@@ -141,6 +148,12 @@ function assertCanAccessContract(contract: ContractAccessRow, user: AuthUser): v
   if (user.role === 'admin') return
   if (contract.client_id === user.id || contract.freelancer_id === user.id) return
   throw new AuditForbiddenError('Only contract participants or admins can access audit logs')
+}
+
+function assertCanAccessProject(project: { client_id: number }, user: AuthUser): void {
+  if (user.role === 'admin') return
+  if (project.client_id === user.id) return
+  throw new AuditForbiddenError('Only the project owner or admins can access project audit logs')
 }
 
 // ─── Service ─────────────────────────────────────────────────────────────────
@@ -198,6 +211,17 @@ export class ContractAuditLogService {
       if (!dispRows[0]) throw new AuditValidationError('disputeId must belong to the provided contract')
     }
 
+    // Validate proposal belongs to contract's project
+    if (data.proposalId) {
+      const propRows = await sql`
+        SELECT id FROM proposals
+         WHERE id = ${data.proposalId}
+           AND project_id = ${contract.project_id}
+         LIMIT 1
+      `
+      if (!propRows[0]) throw new AuditValidationError('proposalId must belong to the provided contract project')
+    }
+
     const rows = await sql<Record<string, unknown>>`
       INSERT INTO contract_audit_logs (
         contract_id,
@@ -210,6 +234,7 @@ export class ContractAuditLogService {
         milestone_id,
         dispute_id,
         amount,
+        proposal_id,
         metadata
       )
       VALUES (
@@ -223,7 +248,87 @@ export class ContractAuditLogService {
         ${data.milestoneId ?? null},
         ${data.disputeId ?? null},
         ${data.amount != null ? data.amount : null}::numeric,
+        ${data.proposalId ?? null},
         ${JSON.stringify(data.metadata ?? {})}::jsonb
+      )
+      RETURNING *
+    `
+
+    return rowToLog(rows[0])
+  }
+
+  /**
+   * Create an audit log entry for a proposal action (shortlist/accept/reject).
+   * Runs inside a caller-provided transaction so it commits atomically with
+   * the proposal state change. Enforces project ownership and proposal status.
+   */
+  async createProposalLog(
+    input: {
+      projectId: number
+      proposalId: number
+      action: Extract<ContractAuditAction, 'proposal_shortlisted' | 'proposal_accepted' | 'proposal_rejected'>
+      actorUserId: number
+      actorWallet: string
+      previousState?: string
+      newState?: string
+      amount?: string
+      metadata?: Record<string, unknown>
+    },
+    walletAddress: string,
+    tx: <T = Record<string, unknown>>(strings: TemplateStringsArray, ...values: unknown[]) => Promise<T[]>
+  ): Promise<ContractAuditLog> {
+    const user = await getAuthUser(walletAddress)
+    if (user.role !== 'admin' && input.actorUserId !== user.id) {
+      throw new AuditForbiddenError('Only admins can create audit logs for other actors')
+    }
+
+    const projectRows = await tx<{ id: number; client_id: number }>`
+      SELECT id, client_id FROM projects WHERE id = ${input.projectId} LIMIT 1
+    `
+    const project = projectRows[0]
+    if (!project) throw new AuditValidationError('projectId does not reference an existing project')
+    assertCanAccessProject(project, user)
+
+    const proposalRows = await tx<{ id: number; project_id: number; status: string }>`
+      SELECT id, project_id, status::text AS status
+        FROM proposals
+       WHERE id = ${input.proposalId}
+       LIMIT 1
+    `
+    const proposal = proposalRows[0]
+    if (!proposal) throw new AuditValidationError('proposalId does not reference an existing proposal')
+    if (proposal.project_id !== input.projectId) {
+      throw new AuditValidationError('proposalId must belong to the provided project')
+    }
+
+    const rows = await tx<Record<string, unknown>>`
+      INSERT INTO contract_audit_logs (
+        contract_id,
+        project_id,
+        action,
+        actor_user_id,
+        actor_wallet,
+        previous_state,
+        new_state,
+        milestone_id,
+        dispute_id,
+        amount,
+        proposal_id,
+        metadata
+      )
+      VALUES (
+        NULL,
+        ${input.projectId},
+        ${input.action},
+        ${input.actorUserId},
+        ${input.actorWallet},
+        ${input.previousState ?? null},
+        ${input.newState ?? null},
+        NULL,
+        NULL,
+        ${input.amount != null ? input.amount : null}::numeric,
+        ${input.proposalId},
+        ${JSON.stringify(input.metadata ?? {})}::jsonb
       )
       RETURNING *
     `
