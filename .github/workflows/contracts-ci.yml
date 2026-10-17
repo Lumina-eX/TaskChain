@@ -1,0 +1,401 @@
+name: Contracts CI — Build, Test & Deploy
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/contracts-ci.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'contracts/**'
+      - '.github/workflows/contracts-ci.yml'
+  workflow_dispatch:
+    inputs:
+      deploy_target:
+        description: 'Deployment target (none | testnet | mainnet)'
+        required: false
+        default: 'none'
+
+# Only one deployment workflow runs at a time per branch
+concurrency:
+  group: contracts-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Pinned versions — update rust-toolchain.toml first, then update here
+  RUST_CHANNEL: "1.82.0"
+  SOROBAN_SDK_VERSION: "25.3.1"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Build contract and verify artifact
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build & Verify Artifact
+    runs-on: ubuntu-latest
+
+    outputs:
+      wasm_hash: ${{ steps.hash.outputs.wasm_hash }}
+      git_commit: ${{ steps.meta.outputs.git_commit }}
+      git_tag: ${{ steps.meta.outputs.git_tag }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (pinned)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_CHANNEL }}
+          targets: wasm32-unknown-unknown
+          components: rustfmt,clippy
+
+      - name: Cache Cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/target
+          key: contracts-${{ env.RUST_CHANNEL }}-${{ hashFiles('contracts/Cargo.lock') }}
+          restore-keys: |
+            contracts-${{ env.RUST_CHANNEL }}-
+
+      - name: Validate toolchain version
+        working-directory: contracts
+        run: |
+          ACTUAL=$(rustc --version)
+          echo "Rust version: $ACTUAL"
+          echo "Expected channel: ${{ env.RUST_CHANNEL }}"
+          if ! echo "$ACTUAL" | grep -q "${{ env.RUST_CHANNEL }}"; then
+            echo "::error::Toolchain mismatch. Expected ${{ env.RUST_CHANNEL }}, got $ACTUAL"
+            exit 1
+          fi
+
+      - name: Check formatting
+        working-directory: contracts
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        working-directory: contracts
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Build WASM artifact (--locked)
+        working-directory: contracts
+        run: |
+          RUSTFLAGS="-C strip=symbols" cargo build \
+            --package escrow \
+            --release \
+            --target wasm32-unknown-unknown \
+            --locked
+
+      - name: Stage and hash artifact
+        id: hash
+        working-directory: contracts
+        run: |
+          mkdir -p artifacts
+          cp contracts/escrow/target/wasm32-unknown-unknown/release/escrow.wasm artifacts/escrow.wasm
+          WASM_HASH=$(sha256sum artifacts/escrow.wasm | awk '{print $1}')
+          echo "wasm_hash=$WASM_HASH" >> "$GITHUB_OUTPUT"
+          echo "$WASM_HASH  escrow.wasm" > artifacts/escrow.wasm.sha256
+          echo "WASM hash: $WASM_HASH"
+
+      - name: Capture build metadata
+        id: meta
+        working-directory: contracts
+        run: |
+          GIT_COMMIT="${{ github.sha }}"
+          GIT_TAG="${{ github.ref_name }}"
+          RUST_VER=$(rustc --version)
+          WASM_SIZE=$(wc -c < artifacts/escrow.wasm)
+          SOROBAN_VER=$(grep -A1 'name = "soroban-sdk"' Cargo.lock \
+            | grep version | head -1 | sed 's/.*"\(.*\)".*/\1/' || echo "unknown")
+          BUILD_TS=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          echo "git_commit=$GIT_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "git_tag=$GIT_TAG" >> "$GITHUB_OUTPUT"
+
+          cat > artifacts/build-info.json <<EOF
+          {
+            "contract": "escrow",
+            "build_timestamp": "$BUILD_TS",
+            "ci_run_id": "${{ github.run_id }}",
+            "ci_run_url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}",
+            "git_commit": "$GIT_COMMIT",
+            "git_tag": "$GIT_TAG",
+            "git_ref": "${{ github.ref }}",
+            "rust_version": "$RUST_VER",
+            "cargo_version": "$(cargo --version)",
+            "soroban_sdk_version": "$SOROBAN_VER",
+            "wasm_hash_sha256": "${{ steps.hash.outputs.wasm_hash }}",
+            "wasm_size_bytes": $WASM_SIZE,
+            "toolchain_file": "contracts/rust-toolchain.toml"
+          }
+          EOF
+          echo "Build info:"
+          cat artifacts/build-info.json
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: escrow-wasm-${{ github.sha }}
+          path: |
+            contracts/artifacts/escrow.wasm
+            contracts/artifacts/escrow.wasm.sha256
+            contracts/artifacts/build-info.json
+          if-no-files-found: error
+          retention-days: 90
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Run full contract test suite
+  # ---------------------------------------------------------------------------
+  test:
+    name: Contract Test Suite
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (pinned)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_CHANNEL }}
+          targets: wasm32-unknown-unknown
+          components: rustfmt,clippy
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            contracts/target
+          key: contracts-${{ env.RUST_CHANNEL }}-${{ hashFiles('contracts/Cargo.lock') }}
+          restore-keys: |
+            contracts-${{ env.RUST_CHANNEL }}-
+
+      - name: Run full test suite
+        working-directory: contracts
+        run: cargo test --workspace --locked 2>&1 | tee test-output.txt
+
+      - name: Check for test failures
+        working-directory: contracts
+        run: |
+          if grep -q "test result: FAILED" test-output.txt; then
+            echo "::error::One or more contract tests FAILED. Deployment blocked."
+            exit 1
+          fi
+          echo "All tests passed."
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ github.sha }}
+          path: contracts/test-output.txt
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Deployment configuration validation
+  # ---------------------------------------------------------------------------
+  validate-config:
+    name: Validate Deployment Configuration
+    runs-on: ubuntu-latest
+    needs: [build, test]
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_target != 'none'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate Testnet configuration
+        if: github.event.inputs.deploy_target == 'testnet'
+        env:
+          TESTNET_DEPLOYER_SECRET: ${{ secrets.TESTNET_DEPLOYER_SECRET }}
+        run: |
+          echo "Validating Testnet deployment configuration..."
+          MISSING=""
+          [ -z "$TESTNET_DEPLOYER_SECRET" ] && MISSING="$MISSING TESTNET_DEPLOYER_SECRET"
+          if [ -n "$MISSING" ]; then
+            echo "::error::Missing required secrets for Testnet deployment:$MISSING"
+            exit 1
+          fi
+          echo "Testnet configuration valid."
+
+      - name: Validate Mainnet configuration
+        if: github.event.inputs.deploy_target == 'mainnet'
+        env:
+          MAINNET_DEPLOYER_SECRET: ${{ secrets.MAINNET_DEPLOYER_SECRET }}
+        run: |
+          echo "Validating Mainnet deployment configuration..."
+          MISSING=""
+          [ -z "$MAINNET_DEPLOYER_SECRET" ] && MISSING="$MISSING MAINNET_DEPLOYER_SECRET"
+          if [ -n "$MISSING" ]; then
+            echo "::error::Missing required secrets for Mainnet deployment:$MISSING"
+            exit 1
+          fi
+          # Ensure mainnet secret is not the same as testnet
+          if [ -n "${{ secrets.TESTNET_DEPLOYER_SECRET }}" ] && \
+             [ "$MAINNET_DEPLOYER_SECRET" = "${{ secrets.TESTNET_DEPLOYER_SECRET }}" ]; then
+            echo "::error::MAINNET_DEPLOYER_SECRET must differ from TESTNET_DEPLOYER_SECRET."
+            exit 1
+          fi
+          echo "Mainnet configuration valid."
+
+  # ---------------------------------------------------------------------------
+  # Job 4: Deploy to Testnet (on workflow_dispatch only)
+  # ---------------------------------------------------------------------------
+  deploy-testnet:
+    name: Deploy to Testnet
+    runs-on: ubuntu-latest
+    environment: testnet
+    needs: [build, test, validate-config]
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.deploy_target == 'testnet'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (pinned)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_CHANNEL }}
+          targets: wasm32-unknown-unknown
+
+      - name: Install stellar CLI
+        run: |
+          curl -fsSL https://github.com/stellar/stellar-cli/releases/latest/download/stellar-cli-x86_64-unknown-linux-gnu.tar.gz \
+            | tar -xz -C /usr/local/bin stellar
+          stellar --version
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: escrow-wasm-${{ github.sha }}
+          path: contracts/artifacts
+
+      - name: Verify artifact hash before deploy
+        working-directory: contracts
+        run: |
+          EXPECTED="${{ needs.build.outputs.wasm_hash }}"
+          ACTUAL=$(sha256sum artifacts/escrow.wasm | awk '{print $1}')
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::Artifact hash mismatch. Expected $EXPECTED, got $ACTUAL. Deployment blocked."
+            exit 1
+          fi
+          echo "Artifact hash verified: $ACTUAL"
+
+      - name: Deploy to Testnet
+        working-directory: contracts
+        env:
+          TESTNET_DEPLOYER_SECRET: ${{ secrets.TESTNET_DEPLOYER_SECRET }}
+          SKIP_BUILD: "1"
+        run: |
+          chmod +x scripts/deploy-testnet.sh
+          bash scripts/deploy-testnet.sh
+
+      - name: Upload deployment record
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-testnet-${{ github.sha }}
+          path: contracts/deployments/testnet-*.json
+          if-no-files-found: error
+          retention-days: 365
+
+      - name: Verify deployment
+        working-directory: contracts
+        run: |
+          RECORD=$(ls -t deployments/testnet-*.json | head -1)
+          chmod +x scripts/verify-deployment.sh
+          bash scripts/verify-deployment.sh "$RECORD"
+
+  # ---------------------------------------------------------------------------
+  # Job 5: Mainnet approval gate + deploy
+  # ---------------------------------------------------------------------------
+  mainnet-approval:
+    name: Mainnet — Manual Approval Gate
+    runs-on: ubuntu-latest
+    environment: mainnet-approval
+    needs: [build, test, validate-config]
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.deploy_target == 'mainnet'
+
+    steps:
+      - name: Approval checkpoint
+        run: |
+          echo "Mainnet deployment approved by a repository maintainer."
+          echo "Proceeding to deployment job."
+
+  deploy-mainnet:
+    name: Deploy to Mainnet
+    runs-on: ubuntu-latest
+    environment: mainnet
+    needs: [build, test, validate-config, mainnet-approval]
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.deploy_target == 'mainnet'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (pinned)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_CHANNEL }}
+          targets: wasm32-unknown-unknown
+
+      - name: Install stellar CLI
+        run: |
+          curl -fsSL https://github.com/stellar/stellar-cli/releases/latest/download/stellar-cli-x86_64-unknown-linux-gnu.tar.gz \
+            | tar -xz -C /usr/local/bin stellar
+          stellar --version
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: escrow-wasm-${{ github.sha }}
+          path: contracts/artifacts
+
+      - name: Verify artifact hash before deploy
+        working-directory: contracts
+        run: |
+          EXPECTED="${{ needs.build.outputs.wasm_hash }}"
+          ACTUAL=$(sha256sum artifacts/escrow.wasm | awk '{print $1}')
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::Artifact hash mismatch. Expected $EXPECTED, got $ACTUAL. Deployment blocked."
+            exit 1
+          fi
+          echo "Artifact hash verified: $ACTUAL"
+
+      - name: Deploy to Mainnet
+        working-directory: contracts
+        env:
+          MAINNET_DEPLOYER_SECRET: ${{ secrets.MAINNET_DEPLOYER_SECRET }}
+          MAINNET_DEPLOY_CONFIRMED: "yes"
+          SKIP_BUILD: "1"
+        run: |
+          chmod +x scripts/deploy-mainnet.sh
+          bash scripts/deploy-mainnet.sh
+
+      - name: Upload deployment record
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-mainnet-${{ github.sha }}
+          path: contracts/deployments/mainnet-*.json
+          if-no-files-found: error
+          retention-days: 3650
+
+      - name: Verify deployment
+        working-directory: contracts
+        run: |
+          RECORD=$(ls -t deployments/mainnet-*.json | head -1)
+          chmod +x scripts/verify-deployment.sh
+          bash scripts/verify-deployment.sh "$RECORD"
