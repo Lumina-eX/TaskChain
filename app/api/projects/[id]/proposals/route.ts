@@ -1,9 +1,11 @@
 // app/api/projects/[id]/proposals/route.ts
 //
 // Issue #216 — Proposal Management API.
+// Issue #217 — Project Workspace & Shared Files UI (workspace access guard).
 //
 // POST /api/projects/:id/proposals  — freelancer submits a proposal
 // GET  /api/projects/:id/proposals  — list proposals (?status=&page=&pageSize=)
+// GET  /api/projects/:id/proposals  — also exposes workspace access metadata
 //
 // The dynamic segment is `[id]` (not `[projectId]`) because Next.js requires
 // sibling segments to share one name and app/api/projects/[id] already exists.
@@ -17,6 +19,7 @@ import {
   CreateProposalSchema,
   ListProposalsQuerySchema,
   UUIDSchema,
+  WorkspaceAccessQuerySchema,
   withProposalAuth,
   fail,
   failOne,
@@ -26,6 +29,7 @@ import {
   insertProposal,
   isUniqueViolation,
   listProposals,
+  resolveWorkspaceAccess,
   ok,
   zodErrors,
 } from "@/lib/proposals";
@@ -71,6 +75,17 @@ export const POST = withProposalAuth<RouteContext>(
         return failOne(409, "PROJECT_NOT_OPEN", "This project is not accepting proposals");
       }
 
+      // Workspace guard: a freelancer may only submit a proposal while they
+      // hold an active workspace grant for the project (see Issue #217).
+      const access = await resolveWorkspaceAccess(projectId, user.id);
+      if (!access.canAccessWorkspace) {
+        return failOne(
+          403,
+          "WORKSPACE_ACCESS_DENIED",
+          "You do not have access to this project workspace",
+        );
+      }
+
       // Duplicate prevention: one active proposal per freelancer per project.
       const existing = await findActiveProposal(projectId, user.id);
       if (existing) {
@@ -114,6 +129,7 @@ export const GET = withProposalAuth<RouteContext>(
       status: params.get("status") ?? undefined,
       page: params.get("page") ?? undefined,
       pageSize: params.get("pageSize") ?? undefined,
+      includeWorkspace: params.get("includeWorkspace") ?? undefined,
     });
     if (!query.success) return fail(400, zodErrors(query.error));
 
@@ -131,6 +147,22 @@ export const GET = withProposalAuth<RouteContext>(
         return failOne(403, "FORBIDDEN", "You do not have access to these proposals");
       }
 
+      // Workspace access metadata: only authorized contract participants may
+      // reach the shared files workspace. Non-participants get a clear 403.
+      const workspaceQuery = WorkspaceAccessQuerySchema.safeParse({
+        includeWorkspace: query.data.includeWorkspace,
+      });
+      if (!workspaceQuery.success) return fail(400, zodErrors(workspaceQuery.error));
+
+      const access = await resolveWorkspaceAccess(projectId, user.id);
+      if (!access.canAccessWorkspace) {
+        return failOne(
+          403,
+          "WORKSPACE_ACCESS_DENIED",
+          "You do not have access to this project workspace",
+        );
+      }
+
       const page = await listProposals({
         projectId,
         status: query.data.status,
@@ -139,7 +171,11 @@ export const GET = withProposalAuth<RouteContext>(
         pageSize: query.data.pageSize,
       });
       // Empty state: `proposals: []` with total 0 — still a 200 success.
-      return ok(page);
+      // Workspace metadata is included so the UI can render the shared files
+      // workspace consistently with the proposals list (Issue #217).
+      return ok(
+        workspaceQuery.data.includeWorkspace ? { ...page, workspace: access } : page,
+      );
     } catch (err) {
       console.error(`[GET /api/projects/${projectId}/proposals]`, err);
       return failOne(500, "PROPOSALS_FETCH_FAILED", "Failed to fetch proposals");
