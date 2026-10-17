@@ -3,7 +3,7 @@
  *
  * These values intentionally use snake_case because they are the stable wire
  * representation used by Soroban symbols, the event indexer, and Postgres.
- * The PascalCase names in the contract source become these symbols through
+ * The PascalCcake names in the contract source become these symbols through
  * Soroban's contract-event macro.
  */
 export type CanonicalSorobanContractEvent =
@@ -150,3 +150,73 @@ export function buildSyncDedupeKey(
 }
 
 export const ESCROW_EVENT_TOPIC_PREFIX = 'escrow_event'
+
+/**
+ * File metadata management for contract workspaces.
+ *
+ * Files are associated with a contract and, optionally, a specific milestone.
+ * Only metadata is persisted here; the binary lives in private object storage
+ * and is served through short-lived signed URLs.
+ */
+export type FileUploadStatus = 'pending' | 'stored' | 'failed' | 'deleted'
+
+export interface ContractFileMetadata {
+  id: string
+  contractId: string
+  milestoneId: string | null
+  uploadedBy: string
+  fileName: string
+  mimeType: string
+  sizeBytes: number
+  /** Monotonically increasing version for a given logical file. */
+  version: number
+  /** Groups all versions of the same logical file together. */
+  fileGroupId: string
+  /** Private storage key; never exposed to clients. */
+  storageKey: string
+  checksum: string | null
+  status: FileUploadStatus
+  createdAt: string
+  updatedAt: string
+  deletedAt: string | null
+}
+
+export type FileAuditAction = 'upload' | 'download' | 'update' | 'delete'
+
+export interface FileAuditRecord {
+  id: string
+  fileId: string
+  contractId: string
+  actorId: string
+  action: FileAuditAction
+  version: number
+  createdAt: string
+  metadata: Record<string, unknown>
+}
+
+/** Supported MIME types for contract workspace uploads. */
+export const SUPPORTED_FILE_MIME_TYPES: readonly string[] = [
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/plain',
+  'text/csv',
+  'image/png',
+  'image/jpeg',
+]
+
+/** Maximum allowed upload size in bytes (25 MiB). */
+export const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024
+
+/** Lifetime of a signed download URL in seconds. */
+export const SIGNED_URL_TTL_SECONDS = 300
+
+export function isSupportedFileType(mimeType: string): boolean {
+  return SUPPORTED_FILE_MIME_TYPES.includes(mimeType.toLowerCase())
+}
+
+export function isWithinFileSizeLimit(sizeBytes: number): boolean {
+  return Number.isFinite(sizeBytes) && sizeBytes > 0 && sizeBytes <= MAX_FILE_SIZE_BYTES
+}

@@ -1,0 +1,18 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "main",
+    "origin",
+    "security/issue-244-project-workspace-file-metadata-api"
+  ],
+  "parent": {
+    "main": null,
+    "origin": "main",
+    "security/issue-244-project-workspace-file-metadata-api": "main"
+  },
+  "order": [
+    "main",
+    "origin",
+    "security/issue-244-project-workspace-file-metadata-api"
+  ]
+}
