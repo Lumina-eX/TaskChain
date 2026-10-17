@@ -4,3 +4,11 @@ target
 # Local settings
 .soroban
 .stellar
+
+# Build artifacts (WASM binaries) — not committed; regenerated from source
+artifacts/*.wasm
+artifacts/*.sha256
+
+# Keep build-info.json and deployment records in version control
+!artifacts/build-info.json
+!deployments/*.json
