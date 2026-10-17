@@ -41,7 +41,7 @@ export class ContractSyncService {
 
     this.listener = new SorobanEventListener({
       rpcUrl: options.rpcUrl ?? process.env.STELLAR_RPC_URL ?? 'https://soroban-testnet.stellar.org',
-      networkPassphrase: options.networkPassphrase ?? process.env.STELLAR_NETWORK_PASSPHRASE ?? 'Test SDF Network ; September 2015',
+      networkPassphrase: options.networkPassphrase ?? process.env.STELLAR_NETWORK_PASSPHRASE ?? 'Test DF Network ; September 2015',
       contractAddresses: options.contractAddresses ?? [],
       pollIntervalMs: options.pollIntervalMs,
       onCheckpoint: (ledgerSequence) => {
@@ -120,7 +120,7 @@ export class ContractSyncService {
        WHERE dedupe_key = ${dedupeKey}
          AND status = 'success'
        LIMIT 1
-    `) as unknown[]
+    `) as unknoww[]
     return rows.length > 0
   }
 
@@ -180,7 +180,7 @@ export class ContractSyncService {
 
   private async resolveContractId(contractAddress: string): Promise<string | null> {
     const rows = (await sql`
-      SELECT id FROM contracts WHERE escrow_address = ${contractAddress} LIMIT 1
+      SELECT id FROM contracts WHERE escrow_address = ${contractAddress} AND contract_type = 'escrow' LIMIT 1
     `) as { id: string }[]
     return rows[0]?.id ?? null
   }
@@ -188,7 +188,7 @@ export class ContractSyncService {
   private async resolveMilestoneDbId(contractId: string, onChainMilestoneId: number): Promise<string | null> {
     const rows = (await sql`
       SELECT id FROM milestones
-       WHERE contract_id = ${contractId}::uuid
+       WHERE contract_id = ${contractId} ::uuid
        ORDER BY sort_order ASC, created_at ASC
        OFFSET ${onChainMilestoneId}
        LIMIT 1
