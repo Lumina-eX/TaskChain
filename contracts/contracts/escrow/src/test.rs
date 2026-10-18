@@ -2,7 +2,7 @@
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Events as _},
+    testutils::{Address as _, Events as _, Ledger as _},
     vec, Address, Env, String,
 };
 
@@ -217,6 +217,7 @@ fn test_dispute_and_resolve_to_freelancer() {
     assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Disputed);
 
     // Arbiter resolves dispute in freelancer's favor
+    env.ledger().set_timestamp(1_234);
     escrow.resolve_dispute(&1, &true);
 
     // Verify freelancer receives funds
@@ -224,6 +225,16 @@ fn test_dispute_and_resolve_to_freelancer() {
     assert_eq!(token_client.balance(&setup.freelancer), 400);
     assert_eq!(token_client.balance(&setup.client), 600);
     assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Resolved);
+    assert_eq!(escrow.get_escrow_balance(), 0);
+    assert_eq!(
+        escrow.get_dispute_resolution(&1).unwrap(),
+        DisputeResolution {
+            outcome: DisputeOutcome::ReleaseToFreelancer,
+            resolver: setup.arbiter,
+            amount: 400,
+            timestamp: 1_234,
+        }
+    );
 }
 
 #[test]
@@ -260,6 +271,10 @@ fn test_dispute_and_resolve_to_client() {
     assert_eq!(token_client.balance(&setup.client), 1000);
     assert_eq!(token_client.balance(&setup.freelancer), 0);
     assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Resolved);
+    assert_eq!(
+        escrow.get_dispute_resolution(&1).unwrap().outcome,
+        DisputeOutcome::RefundToClient
+    );
 }
 
 #[test]
@@ -727,7 +742,36 @@ fn test_resolve_without_dispute_fails() {
     setup.escrow_client.start_milestone(&1);
     setup.escrow_client.submit_milestone(&1);
 
+    assert_eq!(setup.escrow_client.get_dispute_resolution(&1), None);
     setup.escrow_client.resolve_dispute(&1, &true);
+}
+
+#[test]
+#[should_panic]
+fn test_resolution_requires_arbiter_authorization() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 150);
+    setup.escrow_client.fund();
+    setup.escrow_client.start_milestone(&1);
+    setup.escrow_client.submit_milestone(&1);
+    setup.escrow_client.dispute(&1, &setup.client);
+
+    setup.env.mock_auths(&[]);
+    setup.escrow_client.resolve_dispute(&1, &true);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #6)")]
+fn test_duplicate_dispute_resolution_fails() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 150);
+    setup.escrow_client.fund();
+    setup.escrow_client.start_milestone(&1);
+    setup.escrow_client.submit_milestone(&1);
+    setup.escrow_client.dispute(&1, &setup.client);
+    setup.escrow_client.resolve_dispute(&1, &true);
+
+    setup.escrow_client.resolve_dispute(&1, &false);
 }
 
 #[test]

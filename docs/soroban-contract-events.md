@@ -20,6 +20,7 @@ Contract methods that can fail return `Result<_, Error>`. Soroban exposes the en
 | Escrow | 10 | `AlreadyApproved` | `ERR_ALREADY_APPROVED` |
 | Escrow | 11 | `DeadlineExceeded` | `ERR_DEADLINE_EXCEEDED` |
 | Escrow | 12 | `AlreadyExpired` | `ERR_ALREADY_EXPIRED` |
+| Escrow | 13 | `InsufficientBalance` | `ERR_INSUFFICIENT_ESCROW_BALANCE` |
 | Dispute | 1 | `AlreadyInitialized` | `ERR_ALREADY_INITIALIZED` |
 | Dispute | 2 | `NotInitialized` | `ERR_NOT_INITIALIZED` |
 | Dispute | 3 | `DisputeNotFound` | `ERR_DISPUTE_NOT_FOUND` |
@@ -50,8 +51,10 @@ All standardized events use the PascalCase type names below in contract source a
 | `PaymentReleased` / `payment_released` | `contract_id`, `milestone_id`, `actor` | `recipient`, `amount` |
 | `DisputeRaised` / `dispute_raised` | `contract_id`, `milestone_id`, `actor` | none |
 | `RefundIssued` / `refund_issued` | `contract_id`, `milestone_id`, `actor` | `recipient`, `amount` |
-| `DisputeResolved` / `dispute_resolved` | `contract_id`, `milestone_id`, `actor` | `recipient`, `amount`, `release_to_freelancer` |
+| `DisputeResolved` / `dispute_resolved` | `contract_id`, `milestone_id`, `actor` | `recipient`, `amount`, `release_to_freelancer`, `timestamp` |
 | `MilestoneExpired` / `milestone_expired` | `contract_id`, `milestone_id`, `actor` | `recipient`, `amount` |
+
+The escrow's `arbiter` is fixed at initialization. `resolve_dispute(milestone_id, release_to_freelancer)` requires authorization from that exact address and only accepts a milestone in the `Disputed` state. It atomically transfers the milestone amount, updates the escrow balance and milestone state, and stores `DisputeResolution` metadata. `get_dispute_resolution(milestone_id)` returns the recorded outcome (`ReleaseToFreelancer` or `RefundToClient`), resolver, amount, and ledger timestamp; unresolved milestones return no record. The event's `contract_id` and `milestone_id` identify the escrow and disputed milestone, while `actor` identifies the arbitrator.
 
 ### Dispute events
 

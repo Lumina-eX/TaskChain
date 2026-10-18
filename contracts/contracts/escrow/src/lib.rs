@@ -43,6 +43,23 @@ pub enum DataKey {
     Milestone(u32),
     MilestoneIds,
     EscrowBalance,
+    Resolution(u32),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[contracttype]
+pub enum DisputeOutcome {
+    ReleaseToFreelancer,
+    RefundToClient,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub struct DisputeResolution {
+    pub outcome: DisputeOutcome,
+    pub resolver: Address,
+    pub amount: i128,
+    pub timestamp: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -73,6 +90,8 @@ pub enum Error {
     DeadlineExceeded = 11,
     /// ERR_ALREADY_EXPIRED
     AlreadyExpired = 12,
+    /// ERR_INSUFFICIENT_ESCROW_BALANCE
+    InsufficientBalance = 13,
 }
 
 /// Standardized event schemas. Topics are indexed by Soroban RPC consumers;
@@ -186,6 +205,7 @@ pub struct DisputeResolved {
     pub recipient: Address,
     pub amount: i128,
     pub release_to_freelancer: bool,
+    pub timestamp: u64,
 }
 
 #[contractevent]
@@ -554,14 +574,29 @@ impl EscrowContract {
         }
 
         let transfer_amount = milestone.amount;
+        let mut balance: i128 = env.storage().instance().get(&DataKey::EscrowBalance).unwrap_or(0);
+        if balance < transfer_amount {
+            return Err(Error::InsufficientBalance);
+        }
+
+        let outcome = if release_to_freelancer {
+            DisputeOutcome::ReleaseToFreelancer
+        } else {
+            DisputeOutcome::RefundToClient
+        };
+        let timestamp = env.ledger().timestamp();
+        let resolution = DisputeResolution {
+            outcome,
+            resolver: arbiter.clone(),
+            amount: transfer_amount,
+            timestamp,
+        };
+
         milestone.status = MilestoneStatus::Resolved;
         env.storage().instance().set(&DataKey::Milestone(milestone_id), &milestone);
-
-        let mut balance: i128 = env.storage().instance().get(&DataKey::EscrowBalance).unwrap_or(0);
-        if balance >= transfer_amount {
-            balance -= transfer_amount;
-            env.storage().instance().set(&DataKey::EscrowBalance, &balance);
-        }
+        balance -= transfer_amount;
+        env.storage().instance().set(&DataKey::EscrowBalance, &balance);
+        env.storage().instance().set(&DataKey::Resolution(milestone_id), &resolution);
 
         let recipient: Address = if release_to_freelancer {
             env.storage().instance().get(&DataKey::Freelancer).ok_or(Error::NotInitialized)?
@@ -580,6 +615,7 @@ impl EscrowContract {
             recipient,
             amount: transfer_amount,
             release_to_freelancer,
+            timestamp,
         }
         .publish(&env);
 
@@ -668,6 +704,10 @@ impl EscrowContract {
 
     pub fn get_arbiter(env: Env) -> Result<Address, Error> {
         env.storage().instance().get(&DataKey::Arbiter).ok_or(Error::NotInitialized)
+    }
+
+    pub fn get_dispute_resolution(env: Env, milestone_id: u32) -> Option<DisputeResolution> {
+        env.storage().instance().get(&DataKey::Resolution(milestone_id))
     }
 
     pub fn get_token(env: Env) -> Result<Address, Error> {
