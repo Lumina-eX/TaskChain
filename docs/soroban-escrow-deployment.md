@@ -47,7 +47,7 @@ Notes on contract functions and mapping
 - `freelancer_confirm(milestone_id)` — freelancer confirms approval.
 - `release(milestone_id, caller)` — releases funds to freelancer (maps to `release_payment`).
 - `refund(milestone_id, caller)` — refunds client (maps to `refund_payment`).
-- `dispute(...)` / `resolve_dispute(...)` — dispute and arbiter resolution.
+- `dispute(...)` / `resolve_dispute(...)` — dispute and arbiter resolution. `resolve_dispute` requires authorization from the arbitrator address configured at initialization; the `release_to_freelancer` flag selects the payout (`true`) or client refund (`false`). A successful resolution is recorded by `get_dispute_resolution(milestone_id)` and emitted as a `DisputeResolved` event.
 
 Integration notes
 - The contract expects an SPL-like token address (`token`) passed at initialization. The contract uses the standard `token::Client` interface for transfers.
