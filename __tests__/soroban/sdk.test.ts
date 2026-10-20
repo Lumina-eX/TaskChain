@@ -27,6 +27,18 @@ function diagnostic(event: xdr.ContractEvent): xdr.DiagnosticEvent {
   return new xdr.DiagnosticEvent({ inSuccessfulContractCall: true, event })
 }
 
+function contractStruct(fields: Record<string, xdr.ScVal>): xdr.ScVal {
+  return xdr.ScVal.scvMap(
+    Object.entries(fields).map(
+      ([key, val]) =>
+        new xdr.ScMapEntry({
+          key: nativeToScVal(key, { type: 'symbol' }),
+          val,
+        })
+    )
+  )
+}
+
 function invoked(tx: Transaction): { method: string; argCount: number } {
   const operation = tx.operations[0] as {
     func: { value(): { functionName(): { toString(): string }; args(): xdr.ScVal[] } }
@@ -39,6 +51,7 @@ function client(overrides: {
   simulate?: (tx: Transaction) => Promise<Record<string, unknown>>
   sign?: (xdr: string) => Promise<string>
   getTransaction?: () => Promise<Record<string, unknown>>
+  withSigner?: boolean
 } = {}) {
   const sign = vi.fn(overrides.sign ?? (async (xdr: string) => xdr))
   const seen: Transaction[] = []
@@ -46,7 +59,7 @@ function client(overrides: {
     {
       contractId: CONTRACT_ID,
       sourcePublicKey: SOURCE,
-      signTransaction: sign,
+      signTransaction: overrides.withSigner === false ? undefined : sign,
       parties: {
         admin: SOURCE,
         client: SOURCE,
@@ -157,5 +170,83 @@ describe('soroban contract sdk', () => {
     await expect(
       sdk.createEscrow('project-1', 100, [{ id: 1, amount: 40 }])
     ).rejects.toBeInstanceOf(SorobanSdkError)
+  })
+
+  it('reads escrow state through simulation without a signer', async () => {
+    const { sdk, sign, seen } = client({
+      withSigner: false,
+      simulate: async () => ({
+        result: {
+          retval: contractStruct({
+            client: nativeToScVal(SOURCE, { type: 'address' }),
+            freelancer: nativeToScVal(SOURCE, { type: 'address' }),
+            token: nativeToScVal(CONTRACT_ID, { type: 'address' }),
+            funded: nativeToScVal(true),
+            allocated: nativeToScVal(BigInt(1000), { type: 'i128' }),
+            released: nativeToScVal(BigInt(250), { type: 'i128' }),
+            remaining: nativeToScVal(BigInt(750), { type: 'i128' }),
+            token_balance: nativeToScVal(BigInt(750), { type: 'i128' }),
+            status: nativeToScVal(1, { type: 'u32' }),
+          }),
+        },
+      }),
+    })
+
+    await expect(sdk.getEscrowState(CONTRACT_ID)).resolves.toEqual({
+      client: SOURCE,
+      freelancer: SOURCE,
+      token: CONTRACT_ID,
+      funded: true,
+      allocated: '1000',
+      released: '250',
+      remaining: '750',
+      tokenBalance: '750',
+      status: 'active',
+    })
+    expect(invoked(seen[0])).toEqual({ method: 'get_escrow_state', argCount: 0 })
+    expect(sign).not.toHaveBeenCalled()
+  })
+
+  it('returns milestone status and completion details from a read-only query', async () => {
+    const { sdk, seen } = client({
+      simulate: async () => ({
+        result: {
+          retval: contractStruct({
+            id: nativeToScVal(3, { type: 'u32' }),
+            amount: nativeToScVal(BigInt(1000), { type: 'i128' }),
+            released: nativeToScVal(BigInt(1000), { type: 'i128' }),
+            remaining: nativeToScVal(BigInt(0), { type: 'i128' }),
+            deadline: nativeToScVal(BigInt(1234), { type: 'u64' }),
+            description: nativeToScVal('Delivery'),
+            status: nativeToScVal(5, { type: 'u32' }),
+            client_approved: nativeToScVal(true),
+            freelancer_approved: nativeToScVal(false),
+            completed: nativeToScVal(true),
+          }),
+        },
+      }),
+    })
+
+    await expect(sdk.getMilestone(CONTRACT_ID, '3')).resolves.toMatchObject({
+      id: 3,
+      amount: '1000',
+      deadline: '1234',
+      released: '1000',
+      remaining: '0',
+      status: 5,
+      statusName: 'released',
+      completed: true,
+    })
+    expect(invoked(seen[0])).toEqual({ method: 'get_milestone', argCount: 1 })
+  })
+
+  it('surfaces a missing escrow query as a standardized contract error', async () => {
+    const { sdk } = client({
+      simulate: async () => ({ error: 'HostError: Error(Contract, #2)' }),
+    })
+    await expect(sdk.getEscrowState(CONTRACT_ID)).rejects.toMatchObject({
+      code: 'ERR_NOT_INITIALIZED',
+      contractCode: 2,
+    })
   })
 })

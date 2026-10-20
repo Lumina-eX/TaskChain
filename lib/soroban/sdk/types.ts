@@ -11,6 +11,30 @@ export interface Milestone {
   freelancerApproved?: boolean
 }
 
+export type EscrowStateStatus = 'unfunded' | 'active' | 'disputed' | 'settled'
+
+export interface EscrowState {
+  client: string
+  freelancer: string
+  token: string
+  funded: boolean
+  allocated: string
+  released: string
+  remaining: string
+  tokenBalance: string
+  status: EscrowStateStatus
+}
+
+export interface EscrowMilestone extends Omit<Milestone, 'amount' | 'deadline'> {
+  amount: string
+  deadline: string
+  released: string
+  remaining: string
+  status: number
+  statusName: string
+  completed: boolean
+}
+
 /** Addresses required by the escrow `initialize` method. */
 export interface EscrowParties {
   admin: string
@@ -26,7 +50,7 @@ export interface SorobanSdkConfig {
   /** Account that signs and is passed as `caller` where the contract requires it. */
   sourcePublicKey: string
   /** Wallet callback. Receives unsigned transaction XDR and returns signed XDR. */
-  signTransaction: (xdr: string) => Promise<string>
+  signTransaction?: (xdr: string) => Promise<string>
   rpcUrl?: string
   networkPassphrase?: string
   parties?: EscrowParties
@@ -63,8 +87,13 @@ export interface TxResult {
 }
 
 export class SorobanSdkError extends Error {
-  constructor(message: string) {
+  readonly code?: string
+  readonly contractCode?: number
+
+  constructor(message: string, options: { code?: string; contractCode?: number } = {}) {
     super(message)
     this.name = 'SorobanSdkError'
+    this.code = options.code
+    this.contractCode = options.contractCode
   }
 }

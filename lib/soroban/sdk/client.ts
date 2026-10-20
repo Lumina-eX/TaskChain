@@ -16,6 +16,8 @@ import { parseContractError, parseContractEvents, parseDiagnosticEvents } from '
 import {
   SorobanSdkError,
   type EscrowParties,
+  type EscrowMilestone,
+  type EscrowState,
   type Milestone,
   type ParsedContractEvent,
   type SorobanSdkConfig,
@@ -48,7 +50,7 @@ export class SorobanContractClient {
   private readonly networkPassphrase: string
   private readonly contractId: string
   private readonly sourcePublicKey: string
-  private readonly signTransaction: SorobanSdkConfig['signTransaction']
+  private readonly signTransaction?: SorobanSdkConfig['signTransaction']
   private readonly parties?: EscrowParties
   private readonly timeoutSeconds: number
   private readonly confirmationAttempts: number
@@ -71,6 +73,30 @@ export class SorobanContractClient {
       deps?.server ??
       new rpc.Server(config.rpcUrl ?? process.env.STELLAR_RPC_URL ?? DEFAULT_RPC_URL)
     this.assemble = deps?.assemble ?? ((tx, simulation) => rpc.assembleTransaction(tx, simulation))
+  }
+
+  async getEscrowState(escrowId: string): Promise<EscrowState> {
+    assertQueryContractId(escrowId)
+    return parseEscrowState(await this.query(escrowId, 'get_escrow_state', []))
+  }
+
+  async getMilestone(escrowId: string, milestoneId: string): Promise<EscrowMilestone> {
+    assertQueryContractId(escrowId)
+    const id = assertMilestoneId(milestoneId)
+    return parseEscrowMilestone(
+      await this.query(escrowId, 'get_milestone', [encodeU32(id)])
+    )
+  }
+
+  async getMilestones(escrowId: string): Promise<EscrowMilestone[]> {
+    assertQueryContractId(escrowId)
+    const value = await this.query(escrowId, 'get_milestones_state', [])
+    if (!Array.isArray(value)) {
+      throw new SorobanSdkError('Contract returned an invalid milestone list', {
+        code: 'INVALID_QUERY_RESPONSE',
+      })
+    }
+    return value.map(parseEscrowMilestone)
   }
 
   async createEscrow(projectId: string, budget: number, milestones?: Milestone[]): Promise<TxResult> {
@@ -134,6 +160,11 @@ export class SorobanContractClient {
     options: { projectId?: string; expectedEvent?: string; expectedAmount?: number } = {}
   ): Promise<TxResult> {
     try {
+      if (!this.signTransaction) {
+        throw new SorobanSdkError('A transaction signer is required for contract writes', {
+          code: 'SIGNER_REQUIRED',
+        })
+      }
       const account = await this.server.getAccount(this.sourcePublicKey)
       const tx = new TransactionBuilder(account, {
         fee: BASE_FEE,
@@ -214,6 +245,45 @@ export class SorobanContractClient {
       if (err instanceof SorobanSdkError) throw err
       const message = err instanceof Error ? err.message : 'Soroban transaction failed'
       return this.failed(contractId, method, message, { projectId: options.projectId })
+    }
+  }
+
+  private async query(contractId: string, method: string, args: xdr.ScVal[]): Promise<unknown> {
+    try {
+      const account = await this.server.getAccount(this.sourcePublicKey)
+      const tx = new TransactionBuilder(account, {
+        fee: BASE_FEE,
+        networkPassphrase: this.networkPassphrase,
+      })
+        .addOperation(new Contract(contractId).call(method, ...args))
+        .setTimeout(this.timeoutSeconds)
+        .build()
+      const simulation = await this.server.simulateTransaction(tx)
+
+      if (rpc.Api.isSimulationError(simulation)) {
+        const error = parseContractError(simulation.error)
+        throw new SorobanSdkError(error.message, {
+          code: error.code ?? 'CONTRACT_QUERY_FAILED',
+          contractCode: error.contractCode,
+        })
+      }
+      if (rpc.Api.isSimulationRestore(simulation)) {
+        throw new SorobanSdkError('Contract state has expired and cannot be read until restored', {
+          code: 'CONTRACT_STATE_EXPIRED',
+        })
+      }
+      if (!simulation.result?.retval) {
+        throw new SorobanSdkError('Contract query returned no value', {
+          code: 'EMPTY_QUERY_RESPONSE',
+        })
+      }
+      return scValToNative(simulation.result.retval)
+    } catch (err) {
+      if (err instanceof SorobanSdkError) throw err
+      const message = err instanceof Error ? err.message : 'Unknown Soroban query failure'
+      throw new SorobanSdkError(`Unable to query ${method}: ${message}`, {
+        code: 'QUERY_FAILED',
+      })
     }
   }
 
@@ -312,6 +382,14 @@ function assertContractId(value: string, label: string): void {
   if (!StrKey.isValidContract(value)) throw new SorobanSdkError(`${label} is not a contract address`)
 }
 
+function assertQueryContractId(value: string): void {
+  if (!StrKey.isValidContract(value)) {
+    throw new SorobanSdkError('escrowId is not a contract address', {
+      code: 'INVALID_ESCROW_ID',
+    })
+  }
+}
+
 function assertAddress(value: string, label: string): void {
   if (!StrKey.isValidEd25519PublicKey(value) && !StrKey.isValidContract(value)) {
     throw new SorobanSdkError(`${label} is not a Stellar address`)
@@ -326,4 +404,101 @@ function assertParties(parties: EscrowParties): void {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function parseEscrowState(value: unknown): EscrowState {
+  const state = asRecord(value, 'escrow state')
+  const statusValue = readNumber(state.status, 'status')
+  const statuses = ['unfunded', 'active', 'disputed', 'settled'] as const
+  const status = statuses[statusValue]
+  if (!status) {
+    throw new SorobanSdkError('Contract returned an unknown escrow status', {
+      code: 'INVALID_QUERY_RESPONSE',
+    })
+  }
+  return {
+    client: readAddress(state.client, 'client'),
+    freelancer: readAddress(state.freelancer, 'freelancer'),
+    token: readAddress(state.token, 'token'),
+    funded: state.funded === true,
+    allocated: readAmount(state.allocated, 'allocated'),
+    released: readAmount(state.released, 'released'),
+    remaining: readAmount(state.remaining, 'remaining'),
+    tokenBalance: readAmount(state.token_balance, 'token balance'),
+    status,
+  }
+}
+
+function parseEscrowMilestone(value: unknown): EscrowMilestone {
+  const milestone = asRecord(value, 'milestone')
+  const status = readNumber(milestone.status, 'milestone status')
+  const statusNames = [
+    'created',
+    'funded',
+    'in_progress',
+    'submitted',
+    'approved',
+    'released',
+    'refunded',
+    'disputed',
+    'resolved',
+    'auto_expired',
+  ]
+  const statusName = statusNames[status]
+  if (!statusName) {
+    throw new SorobanSdkError('Contract returned an unknown milestone status', {
+      code: 'INVALID_QUERY_RESPONSE',
+    })
+  }
+  return {
+    id: readNumber(milestone.id, 'milestone id'),
+    amount: readAmount(milestone.amount, 'milestone amount'),
+    deadline: readAmount(milestone.deadline, 'milestone deadline'),
+    released: readAmount(milestone.released, 'milestone released amount'),
+    remaining: readAmount(milestone.remaining, 'milestone remaining amount'),
+    description: typeof milestone.description === 'string' ? milestone.description : '',
+    status,
+    statusName,
+    clientApproved: milestone.client_approved === true,
+    freelancerApproved: milestone.freelancer_approved === true,
+    completed: milestone.completed === true,
+  }
+}
+
+function asRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new SorobanSdkError(`Contract returned an invalid ${label}`, {
+      code: 'INVALID_QUERY_RESPONSE',
+    })
+  }
+  return value as Record<string, unknown>
+}
+
+function readAddress(value: unknown, label: string): string {
+  if (typeof value === 'string') return value
+  if (value && typeof value === 'object' && 'toString' in value) {
+    return String(value)
+  }
+  throw new SorobanSdkError(`Contract returned an invalid ${label} address`, {
+    code: 'INVALID_QUERY_RESPONSE',
+  })
+}
+
+function readAmount(value: unknown, label: string): string {
+  if (typeof value === 'bigint' || typeof value === 'number' || typeof value === 'string') {
+    return value.toString()
+  }
+  throw new SorobanSdkError(`Contract returned an invalid ${label}`, {
+    code: 'INVALID_QUERY_RESPONSE',
+  })
+}
+
+function readNumber(value: unknown, label: string): number {
+  const parsed = typeof value === 'bigint' ? Number(value) : typeof value === 'number' ? value : NaN
+  if (!Number.isSafeInteger(parsed)) {
+    throw new SorobanSdkError(`Contract returned an invalid ${label}`, {
+      code: 'INVALID_QUERY_RESPONSE',
+    })
+  }
+  return parsed
 }

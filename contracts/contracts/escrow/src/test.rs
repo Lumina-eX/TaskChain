@@ -119,6 +119,11 @@ fn test_happy_path() {
     assert_eq!(escrow.get_arbiter(), setup.arbiter);
     assert_eq!(escrow.get_token(), setup.token_address);
     assert_eq!(escrow.is_funded(), false);
+    let initial_state = escrow.get_escrow_state();
+    assert_eq!(initial_state.allocated, 300);
+    assert_eq!(initial_state.released, 0);
+    assert_eq!(initial_state.remaining, 0);
+    assert_eq!(initial_state.status, EscrowStatus::Unfunded);
 
     let fetched_milestones = escrow.get_milestones();
     assert_eq!(fetched_milestones.len(), 2);
@@ -135,6 +140,10 @@ fn test_happy_path() {
 
     let updated_milestones = escrow.get_milestones();
     assert_eq!(updated_milestones.get(0).unwrap().status, MilestoneStatus::Funded);
+    let funded_state = escrow.get_escrow_state();
+    assert_eq!(funded_state.remaining, 300);
+    assert_eq!(funded_state.token_balance, 300);
+    assert_eq!(funded_state.status, EscrowStatus::Active);
 
     // Submit Milestone 1
     escrow.start_milestone(&1);
@@ -154,6 +163,15 @@ fn test_happy_path() {
     assert_eq!(token_client.balance(&setup.freelancer), 100);
     assert_eq!(token_client.balance(&escrow.address), 200);
     assert_eq!(escrow.get_escrow_balance(), 200);
+    let released_state = escrow.get_escrow_state();
+    assert_eq!(released_state.released, 100);
+    assert_eq!(released_state.remaining, 200);
+    assert_eq!(released_state.token_balance, 200);
+    let milestone_state = escrow.get_milestone(&1);
+    assert_eq!(milestone_state.amount, 100);
+    assert_eq!(milestone_state.released, 100);
+    assert_eq!(milestone_state.remaining, 0);
+    assert_eq!(milestone_state.completed, true);
 }
 
 #[test]
@@ -187,6 +205,15 @@ fn test_voluntary_refund() {
     // Client balance is restored (750 + 250 = 1000)
     assert_eq!(token_client.balance(&setup.client), 1000);
     assert_eq!(token_client.balance(&escrow.address), 0);
+    let refunded_state = escrow.get_escrow_state();
+    assert_eq!(refunded_state.released, 0);
+    assert_eq!(refunded_state.remaining, 0);
+    assert_eq!(refunded_state.token_balance, 0);
+    assert_eq!(refunded_state.status, EscrowStatus::Settled);
+    let milestone_state = escrow.get_milestone(&1);
+    assert_eq!(milestone_state.released, 0);
+    assert_eq!(milestone_state.remaining, 0);
+    assert_eq!(milestone_state.completed, true);
 }
 
 #[test]
@@ -224,6 +251,9 @@ fn test_dispute_and_resolve_to_freelancer() {
     assert_eq!(token_client.balance(&setup.freelancer), 400);
     assert_eq!(token_client.balance(&setup.client), 600);
     assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Resolved);
+    let state = escrow.get_milestone(&1);
+    assert_eq!(state.released, 400);
+    assert_eq!(state.remaining, 0);
 }
 
 #[test]
@@ -260,6 +290,9 @@ fn test_dispute_and_resolve_to_client() {
     assert_eq!(token_client.balance(&setup.client), 1000);
     assert_eq!(token_client.balance(&setup.freelancer), 0);
     assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Resolved);
+    let state = escrow.get_milestone(&1);
+    assert_eq!(state.released, 0);
+    assert_eq!(state.remaining, 0);
 }
 
 #[test]

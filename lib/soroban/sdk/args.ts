@@ -64,11 +64,15 @@ export function assertSafeAmount(value: number, label: string): void {
 
 export function assertMilestoneId(milestoneId: string): number {
   if (!/^\d+$/.test(milestoneId)) {
-    throw new SorobanSdkError('milestoneId must be an unsigned integer')
+    throw new SorobanSdkError('milestoneId must be an unsigned integer', {
+      code: 'INVALID_MILESTONE_ID',
+    })
   }
   const id = Number(milestoneId)
   if (!Number.isSafeInteger(id) || id > 0xffffffff) {
-    throw new SorobanSdkError('milestoneId must be an unsigned integer')
+    throw new SorobanSdkError('milestoneId must be an unsigned integer', {
+      code: 'INVALID_MILESTONE_ID',
+    })
   }
   return id
 }
