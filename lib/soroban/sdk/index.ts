@@ -4,6 +4,9 @@ export { ESCROW_CONTRACT_ERRORS, parseContractError, parseContractEvent } from '
 export { SorobanSdkError } from './types'
 export type {
   EscrowParties,
+  EscrowMilestone,
+  EscrowState,
+  EscrowStateStatus,
   Milestone,
   ParsedContractEvent,
   SorobanSdkConfig,

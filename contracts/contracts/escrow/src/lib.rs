@@ -87,6 +87,76 @@ pub enum Error {
     InsufficientBalance = 16,
 }
 
+fn previously_released(env: &Env) -> i128 {
+    if let Some(released) = env
+        .storage()
+        .instance()
+        .get::<DataKey, i128>(&DataKey::EscrowReleased)
+    {
+        return released;
+    }
+
+    let ids: Vec<u32> = env
+        .storage()
+        .instance()
+        .get(&DataKey::MilestoneIds)
+        .unwrap_or(Vec::new(env));
+    let mut released = 0;
+    for i in 0..ids.len() {
+        if let Some(milestone) = env
+            .storage()
+            .instance()
+            .get::<DataKey, Milestone>(&DataKey::Milestone(ids.get(i).unwrap()))
+        {
+            if milestone.status == MilestoneStatus::Released {
+                released += milestone.amount;
+            }
+        }
+    }
+    released
+}
+
+fn milestone_state(env: &Env, milestone: Milestone) -> MilestoneState {
+    let completed = milestone.status == MilestoneStatus::Released
+        || milestone.status == MilestoneStatus::Refunded
+        || milestone.status == MilestoneStatus::Resolved
+        || milestone.status == MilestoneStatus::AutoExpired;
+    let released = if milestone.status == MilestoneStatus::Released
+        || (milestone.status == MilestoneStatus::Resolved
+            && env
+                .storage()
+                .instance()
+                .get::<DataKey, bool>(&DataKey::ResolvedToFreelancer(milestone.id))
+                .unwrap_or(false))
+    {
+        milestone.amount
+    } else {
+        0
+    };
+    let funded: bool = env
+        .storage()
+        .instance()
+        .get(&DataKey::IsFunded)
+        .unwrap_or(false);
+
+    MilestoneState {
+        id: milestone.id,
+        deadline: milestone.deadline,
+        amount: milestone.amount,
+        released,
+        remaining: if funded && !completed {
+            milestone.amount
+        } else {
+            0
+        },
+        status: milestone.status,
+        description: milestone.description,
+        client_approved: milestone.client_approved,
+        freelancer_approved: milestone.freelancer_approved,
+        completed,
+    }
+}
+
 /// Standardized event schemas. Topics are indexed by Soroban RPC consumers;
 /// non-topic fields are emitted as the event data payload.
 #[contractevent]
@@ -341,6 +411,7 @@ impl EscrowContract {
         env.storage().instance().set(&DataKey::Token, &token);
         env.storage().instance().set(&DataKey::MilestoneIds, &ids);
         env.storage().instance().set(&DataKey::IsFunded, &false);
+        env.storage().instance().set(&DataKey::EscrowReleased, &0i128);
 
         EscrowCreated {
             contract_id: env.current_contract_address(),
@@ -913,6 +984,110 @@ impl EscrowContract {
     }
 
     // --- State Getters ---
+
+    pub fn get_escrow_state(env: Env) -> Result<EscrowState, Error> {
+        let client: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Client)
+            .ok_or(Error::NotInitialized)?;
+        let freelancer: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Freelancer)
+            .ok_or(Error::NotInitialized)?;
+        let token_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Token)
+            .ok_or(Error::NotInitialized)?;
+        let funded: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::IsFunded)
+            .unwrap_or(false);
+        let ids: Vec<u32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MilestoneIds)
+            .ok_or(Error::NotInitialized)?;
+
+        let mut allocated = 0i128;
+        let mut any_disputed = false;
+        let mut all_settled = true;
+        for i in 0..ids.len() {
+            let milestone: Milestone = env
+                .storage()
+                .instance()
+                .get(&DataKey::Milestone(ids.get(i).unwrap()))
+                .ok_or(Error::MilestoneNotFound)?;
+            allocated += milestone.amount;
+            if milestone.status == MilestoneStatus::Disputed {
+                any_disputed = true;
+            }
+            if milestone.status != MilestoneStatus::Released
+                && milestone.status != MilestoneStatus::Refunded
+                && milestone.status != MilestoneStatus::Resolved
+                && milestone.status != MilestoneStatus::AutoExpired
+            {
+                all_settled = false;
+            }
+        }
+
+        let status = if !funded {
+            EscrowStatus::Unfunded
+        } else if any_disputed {
+            EscrowStatus::Disputed
+        } else if all_settled {
+            EscrowStatus::Settled
+        } else {
+            EscrowStatus::Active
+        };
+        let token_client = token::Client::new(&env, &token_address);
+
+        Ok(EscrowState {
+            client,
+            freelancer,
+            token: token_address,
+            funded,
+            allocated,
+            released: previously_released(&env),
+            remaining: env
+                .storage()
+                .instance()
+                .get(&DataKey::EscrowBalance)
+                .unwrap_or(0),
+            token_balance: token_client.balance(&env.current_contract_address()),
+            status,
+        })
+    }
+
+    pub fn get_milestone(env: Env, milestone_id: u32) -> Result<MilestoneState, Error> {
+        let milestone: Milestone = env.storage()
+            .instance()
+            .get(&DataKey::Milestone(milestone_id))
+            .ok_or(Error::MilestoneNotFound)?;
+        Ok(milestone_state(&env, milestone))
+    }
+
+    pub fn get_milestones_state(env: Env) -> Result<Vec<MilestoneState>, Error> {
+        let ids: Vec<u32> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MilestoneIds)
+            .ok_or(Error::NotInitialized)?;
+        let mut milestones = Vec::new(&env);
+        for i in 0..ids.len() {
+            let id = ids.get(i).unwrap();
+            let milestone: Milestone = env
+                .storage()
+                .instance()
+                .get(&DataKey::Milestone(id))
+                .ok_or(Error::MilestoneNotFound)?;
+            milestones.push_back(milestone_state(&env, milestone));
+        }
+        Ok(milestones)
+    }
 
     pub fn get_milestones(env: Env) -> Result<Vec<Milestone>, Error> {
         let ids: Vec<u32> = env.storage().instance().get(&DataKey::MilestoneIds).ok_or(Error::NotInitialized)?;
