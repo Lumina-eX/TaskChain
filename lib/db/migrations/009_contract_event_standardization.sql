@@ -13,6 +13,9 @@ BEGIN
     ALTER TYPE contract_sync_event_type ADD VALUE IF NOT EXISTS 'refund_issued';
     ALTER TYPE contract_sync_event_type ADD VALUE IF NOT EXISTS 'dispute_resolved';
     ALTER TYPE contract_sync_event_type ADD VALUE IF NOT EXISTS 'milestone_expired';
+    ALTER TYPE contract_sync_event_type ADD VALUE IF NOT EXISTS 'deadline_set';
+    ALTER TYPE contract_sync_event_type ADD VALUE IF NOT EXISTS 'deadline_expired';
+    ALTER TYPE contract_sync_event_type ADD VALUE IF NOT EXISTS 'deadline_extended';
     ALTER TYPE contract_sync_event_type ADD VALUE IF NOT EXISTS 'dispute_created';
     ALTER TYPE contract_sync_event_type ADD VALUE IF NOT EXISTS 'vote_cast';
     ALTER TYPE contract_sync_event_type ADD VALUE IF NOT EXISTS 'stake_claimed';

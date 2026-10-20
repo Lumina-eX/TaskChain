@@ -20,7 +20,11 @@ export interface ContractStatusUpdate {
 }
 
 export interface MilestoneStatusUpdate {
-  status: string
+  status?: string
+  dueDate?: string
+  isOverdue?: boolean
+  overdueAt?: string | null
+  reminderSentAt?: string | null
   submittedAt?: string
   approvedAt?: string
   paidAt?: string
@@ -53,6 +57,17 @@ export function mapEventToAction(event: SorobanContractEvent, data: SorobanEvent
         contractUpdate: null,
         milestoneUpdate: null,
         milestoneId: null,
+        disputeInfo: null,
+      }
+
+    case 'deadline_set':
+      return {
+        kind: 'update_milestone',
+        contractUpdate: null,
+        milestoneUpdate: {
+          ...(data.deadline != null ? { dueDate: new Date(data.deadline * 1000).toISOString() } : {}),
+        },
+        milestoneId: data.milestoneId ?? null,
         disputeInfo: null,
       }
 
@@ -181,6 +196,33 @@ export function mapEventToAction(event: SorobanContractEvent, data: SorobanEvent
         milestoneUpdate: {
           status: 'auto_expired',
           rejectionReason: 'Milestone deadline exceeded',
+        },
+        milestoneId: data.milestoneId ?? null,
+        disputeInfo: null,
+      }
+
+    case 'deadline_expired':
+      return {
+        kind: 'update_milestone',
+        contractUpdate: null,
+        milestoneUpdate: {
+          status: 'expired',
+          rejectionReason: 'Milestone deadline exceeded',
+        },
+        milestoneId: data.milestoneId ?? null,
+        disputeInfo: null,
+      }
+
+    case 'deadline_extended':
+      return {
+        kind: 'update_milestone',
+        contractUpdate: null,
+        milestoneUpdate: {
+          ...(data.wasExpired ? { status: 'extended' } : {}),
+          ...(data.deadline != null ? { dueDate: new Date(data.deadline * 1000).toISOString() } : {}),
+          isOverdue: false,
+          overdueAt: null,
+          reminderSentAt: null,
         },
         milestoneId: data.milestoneId ?? null,
         disputeInfo: null,

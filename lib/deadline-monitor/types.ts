@@ -6,7 +6,15 @@ export interface DeadlineCheckResult {
 }
 
 /** Milestone statuses that no longer need deadline tracking once reached. */
-export const DEADLINE_EXEMPT_STATUSES = ['approved', 'paid', 'rejected'] as const
+export const DEADLINE_EXEMPT_STATUSES = [
+  'approved',
+  'paid',
+  'rejected',
+  'disputed',
+  'refunded',
+  'expired',
+  'auto_expired',
+] as const
 
 /** How far ahead of the due date to send a single "deadline approaching" reminder. */
 export function getReminderWindowMs(): number {

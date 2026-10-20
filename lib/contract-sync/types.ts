@@ -17,6 +17,9 @@ export type CanonicalSorobanContractEvent =
   | 'refund_issued'
   | 'dispute_resolved'
   | 'milestone_expired'
+  | 'deadline_set'
+  | 'deadline_expired'
+  | 'deadline_extended'
   | 'dispute_created'
   | 'vote_cast'
   | 'stake_claimed'
@@ -47,6 +50,9 @@ export const CANONICAL_SOROBAN_EVENTS: readonly CanonicalSorobanContractEvent[] 
   'refund_issued',
   'dispute_resolved',
   'milestone_expired',
+  'deadline_set',
+  'deadline_expired',
+  'deadline_extended',
   'dispute_created',
   'vote_cast',
   'stake_claimed',
@@ -75,6 +81,9 @@ const EVENT_ALIASES: Record<string, CanonicalSorobanContractEvent> = {
   refundissued: 'refund_issued',
   disputeresolved: 'dispute_resolved',
   milestoneexpired: 'milestone_expired',
+  deadlineset: 'deadline_set',
+  deadlineexpired: 'deadline_expired',
+  deadlineextended: 'deadline_extended',
   disputecreated: 'dispute_created',
   votecast: 'vote_cast',
   stakeclaimed: 'stake_claimed',
@@ -98,6 +107,8 @@ export interface SorobanEventPayload {
   milestoneId?: number
   disputeId?: number
   amount?: string
+  deadline?: number
+  wasExpired?: boolean
   actor?: string
   recipient?: string
   support?: boolean

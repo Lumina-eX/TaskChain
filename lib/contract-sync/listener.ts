@@ -162,10 +162,12 @@ export class SorobanEventListener {
       const milestoneId = this.extractMilestoneId(eventName, topic, data, legacy)
       const disputeId = this.extractDisputeId(eventName, topic, data, legacy)
       const amount = this.extractEventField(eventName, data, 'amount', legacy)
+      const deadline = this.extractDeadline(eventName, data)
       const actor = this.extractActor(eventName, topic, data, legacy)
       const recipient = this.extractEventField(eventName, data, 'recipient', legacy)
       const support = this.extractBooleanField(data, 'support')
       const releaseToFreelancer = this.extractBooleanField(data, 'release_to_freelancer')
+      const wasExpired = this.extractBooleanField(data, 'was_expired')
 
       return {
         event: eventName as SorobanContractEvent,
@@ -177,6 +179,8 @@ export class SorobanEventListener {
         milestoneId,
         disputeId,
         amount,
+        deadline,
+        wasExpired,
         actor,
         recipient,
         support,
@@ -209,10 +213,25 @@ export class SorobanEventListener {
     data: any[],
     legacy: boolean
   ): number | undefined {
-    if (['milestone_submitted', 'milestone_approved', 'milestone_confirmed', 'payment_released', 'dispute_raised', 'refund_issued', 'dispute_resolved', 'milestone_expired', 'dispute_created', 'vote_cast', 'stake_claimed'].includes(eventName)) {
+    if (['milestone_submitted', 'milestone_approved', 'milestone_confirmed', 'payment_released', 'dispute_raised', 'refund_issued', 'dispute_resolved', 'milestone_expired', 'deadline_set', 'deadline_expired', 'deadline_extended', 'dispute_created', 'vote_cast', 'stake_claimed'].includes(eventName)) {
       return this.extractNumber(topic[legacy ? 1 : 2]) ?? this.extractNumber(data[0])
     }
     return undefined
+  }
+
+  private extractDeadline(eventName: string, data: any[]): number | undefined {
+    const value = data[0]
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const deadline = value.deadline ?? value.new_deadline ?? value.newDeadline
+      return this.extractNumber(deadline)
+    }
+    if (eventName === 'deadline_extended') {
+      return this.extractNumber(data[1])
+    }
+    if (eventName === 'milestone_submitted') {
+      return this.extractNumber(data[1])
+    }
+    return this.extractNumber(data[0])
   }
 
   private extractDisputeId(
@@ -252,9 +271,15 @@ export class SorobanEventListener {
 
   private extractBooleanField(data: any[], field: string): boolean | undefined {
     const value = data[0]
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
-    const result = value[field] ?? value[this.toCamelCase(field)]
-    return typeof result === 'boolean' ? result : undefined
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const result = value[field] ?? value[this.toCamelCase(field)]
+      if (typeof result === 'boolean') return result
+    }
+    if (field === 'was_expired') {
+      const positionalValue = data[2]
+      return typeof positionalValue === 'boolean' ? positionalValue : undefined
+    }
+    return undefined
   }
 
   private extractNumber(value: any): number | undefined {

@@ -20,6 +20,10 @@ Contract methods that can fail return `Result<_, Error>`. Soroban exposes the en
 | Escrow | 10 | `AlreadyApproved` | `ERR_ALREADY_APPROVED` |
 | Escrow | 11 | `DeadlineExceeded` | `ERR_DEADLINE_EXCEEDED` |
 | Escrow | 12 | `AlreadyExpired` | `ERR_ALREADY_EXPIRED` |
+| Escrow | 13 | `InvalidDeadline` | `ERR_INVALID_DEADLINE` |
+| Escrow | 14 | `ExtensionNotFound` | `ERR_EXTENSION_NOT_FOUND` |
+| Escrow | 15 | `DuplicateMilestoneId` | `ERR_DUPLICATE_MILESTONE_ID` |
+| Escrow | 16 | `InsufficientBalance` | `ERR_INSUFFICIENT_BALANCE` |
 | Dispute | 1 | `AlreadyInitialized` | `ERR_ALREADY_INITIALIZED` |
 | Dispute | 2 | `NotInitialized` | `ERR_NOT_INITIALIZED` |
 | Dispute | 3 | `DisputeNotFound` | `ERR_DISPUTE_NOT_FOUND` |
@@ -52,6 +56,18 @@ All standardized events use the PascalCase type names below in contract source a
 | `RefundIssued` / `refund_issued` | `contract_id`, `milestone_id`, `actor` | `recipient`, `amount` |
 | `DisputeResolved` / `dispute_resolved` | `contract_id`, `milestone_id`, `actor` | `recipient`, `amount`, `release_to_freelancer` |
 | `MilestoneExpired` / `milestone_expired` | `contract_id`, `milestone_id`, `actor` | `recipient`, `amount` |
+| `DeadlineSet` / `deadline_set` | `contract_id`, `milestone_id`, `actor` | `deadline` |
+| `DeadlineExpired` / `deadline_expired` | `contract_id`, `milestone_id`, `actor` | `deadline` |
+| `DeadlineExtended` / `deadline_extended` | `contract_id`, `milestone_id`, `actor` | `previous_deadline`, `new_deadline`, `was_expired` |
+
+Milestones require a future Unix timestamp deadline at initialization. After the
+deadline, the permissionless `auto_expire` call marks a funded, unfinished
+milestone as `Expired` and leaves its funds in escrow. The client may call
+`refund` to return those funds; alternatively, the client or arbitrator may
+request a later deadline and only the arbitrator can approve it. Approval
+transitions `Expired` to `Extended`. A submitted/approved milestone may still
+enter dispute after expiry, in which case its funds remain locked until the
+arbitrator resolves it. Expiry never transfers funds automatically.
 
 ### Dispute events
 

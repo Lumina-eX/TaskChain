@@ -39,6 +39,12 @@ export type Permission =
   | 'admin:system_oversight'
   // Activity log permissions
   | 'activity:view'
+  // Payment ledger & reconciliation permissions
+  | 'ledger:view'
+  | 'ledger:export'
+  | 'reconciliation:view'
+  | 'reconciliation:run'
+  | 'reconciliation:resolve'
   // General permissions
   | 'reputation:view'
   | 'reviews:create'
@@ -55,6 +61,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'dispute:create',
     'dispute:view',
     'activity:view',
+    'ledger:view',
+    'ledger:export',
     'reputation:view',
     'reviews:create',
     'reviews:view',
@@ -77,6 +85,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'dispute:create',
     'dispute:view',
     'activity:view',
+    'ledger:view',
+    'ledger:export',
     'reputation:view',
     'reviews:create',
     'reviews:view',
@@ -105,6 +115,11 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     'admin:users_manage',
     'admin:contracts_freeze',
     'admin:system_oversight',
+    'ledger:view',
+    'ledger:export',
+    'reconciliation:view',
+    'reconciliation:run',
+    'reconciliation:resolve',
     'reputation:view',
     'reviews:create',
     'reviews:view',

@@ -177,6 +177,38 @@ describe('SorobanEventListener', () => {
     canonicalListener.stop()
   })
 
+  it('parses deadline extension events with the milestone id and new deadline', async () => {
+    vi.useRealTimers()
+    const canonicalListener = new SorobanEventListener({
+      rpcUrl: 'https://soroban-testnet.stellar.org',
+      networkPassphrase: 'Test SDF Network ; September 2015',
+      contractAddresses: ['CA1234'],
+      initialLedger: 500,
+    })
+    const canonicalCallback = vi.fn()
+    canonicalListener.setCallback(canonicalCallback)
+
+    mockGetEvents.mockResolvedValue({
+      events: [{
+        topic: ['DeadlineExtended', 'CA-CONTRACT', '7', 'GARB'],
+        value: [100, 200, true],
+        ledger: 501,
+        txHash: 'tx-deadline-extension',
+      }],
+    })
+    mockGetLatestLedger.mockResolvedValue({ sequence: 505 })
+
+    await (canonicalListener as any).poll()
+
+    expect(canonicalCallback).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'deadline_extended',
+      milestoneId: 7,
+      deadline: 200,
+      wasExpired: true,
+    }))
+    canonicalListener.stop()
+  })
+
   it('awaits the callback for each event before advancing the checkpoint', async () => {
       // Uses real timers and calls the private poll() directly so the
       // ordering can be observed deterministically without racing fake-timer

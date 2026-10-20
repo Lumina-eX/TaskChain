@@ -27,6 +27,10 @@ export type EscrowStatus =
 
 export type MilestoneStatus =
   | 'auto_expired'
+  | 'expired'
+  | 'extended'
+  | 'disputed'
+  | 'refunded'
   | 'pending'
   | 'in_progress'
   | 'submitted'
