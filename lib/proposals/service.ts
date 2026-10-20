@@ -110,7 +110,7 @@ export async function listProposalsForFreelancer(
 export async function updateProposalStatus(
   proposalId: string,
   clientId: string,
-  next: Extract<ProposalStatus, "accepted" | "rejected">
+  next: Extract<ProposalStatus, "pending" | "shortlisted" | "accepted" | "rejected">
 ): Promise<Proposal> {
   const check = (await sql`
     SELECT status, client_id FROM proposals WHERE id = ${proposalId}
@@ -119,16 +119,28 @@ export async function updateProposalStatus(
   if (!check[0]) throw new Error("NOT_FOUND");
   if (check[0].client_id !== clientId) throw new Error("NOT_FOUND");
   const previous = check[0].status;
-  if (previous === next) throw new Error("NO_CHANGE");
+  const allowed: Record<string, ProposalStatus[]> = {
+    pending: ["shortlisted", "accepted", "rejected"],
+    shortlisted: ["pending", "accepted", "rejected"],
+  };
+  if (!allowed[previous]?.includes(next)) throw new Error("INVALID_TRANSITION");
 
-  await sql`UPDATE proposals SET status = ${next}, updated_at = NOW() WHERE id = ${proposalId}`;
+  const updated = (await sql`
+    UPDATE proposals
+    SET status = ${next}, updated_at = NOW()
+    WHERE id = ${proposalId}
+      AND client_id = ${clientId}
+      AND status = ${previous}
+    RETURNING id
+  `) as unknown as { id: string }[];
+  if (!updated.length) throw new Error("PROPOSAL_CHANGED");
 
   await sql`
     INSERT INTO proposal_audit_logs
       (proposal_id, actor_id, action, previous_status, new_status)
     VALUES (
       ${proposalId}, ${clientId},
-      ${next === "accepted" ? "accept" : "reject"},
+      ${next === "accepted" ? "accept" : next === "rejected" ? "reject" : "update"},
       ${previous}, ${next}
     )
   `;

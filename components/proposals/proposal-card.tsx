@@ -10,6 +10,9 @@ interface Props {
   readOnly?: boolean;
   onAccept?: (p: Proposal) => void;
   onReject?: (p: Proposal) => void;
+  onShortlist?: (p: Proposal) => void;
+  onCompare?: (p: Proposal) => void;
+  comparing?: boolean;
   onViewProfile?: (p: Proposal) => void;
 }
 
@@ -18,6 +21,9 @@ export function ProposalCard({
   readOnly,
   onAccept,
   onReject,
+  onShortlist,
+  onCompare,
+  comparing = false,
   onViewProfile,
 }: Props) {
   const ISO = /^[A-Z]{3}$/;
@@ -82,8 +88,23 @@ export function ProposalCard({
           >
             View profile
           </Button>
-          {!readOnly && proposal.status === "pending" && (
+          {!readOnly && (proposal.status === "pending" || proposal.status === "shortlisted") && (
             <>
+              <Button
+                size="sm"
+                variant="outline"
+                aria-pressed={comparing}
+                onClick={() => onCompare?.(proposal)}
+              >
+                {comparing ? "Remove comparison" : "Compare"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => onShortlist?.(proposal)}
+              >
+                {proposal.status === "shortlisted" ? "Remove from shortlist" : "Shortlist"}
+              </Button>
               <Button size="sm" onClick={() => onAccept?.(proposal)}>
                 Accept
               </Button>
