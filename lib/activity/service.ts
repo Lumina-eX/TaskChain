@@ -37,6 +37,8 @@ function rowToLog(row: any): ActivityLog {
     projectId: row.project_id ?? null,
     milestoneId: row.milestone_id ?? null,
     disputeId: row.dispute_id ?? null,
+    fileId: row.file_id ?? null,
+    fileVersion: row.file_version ?? null,
     actionType: row.action_type,
     description: row.description,
     metadata: row.metadata ?? {},
@@ -52,17 +54,20 @@ export class ActivityService {
     const rows = await sql`
       INSERT INTO activity_logs (
         actor_id, contract_id, project_id, milestone_id, dispute_id,
+        file_id, file_version,
         action_type, description, metadata
       )
       VALUES (
-        ${input.actorId}::uuid,
-        ${input.contractId ?? null}::uuid,
-        ${input.projectId ?? null}::uuid,
-        ${input.milestoneId ?? null}::uuid,
-        ${input.disputeId ?? null}::uuid,
-        ${input.actionType}::activity_action_type,
+        ${input.actorId} ::uuid,
+        ${input.contractId ?? null} ::uuid,
+        ${input.projectId ?? null} ::uuid,
+        ${input.milestoneId ?? null} ::uuid,
+        ${input.disputeId ?? null} ::uuid,
+        ${input.fileId ?? null} ::uuid,
+        ${input.fileVersion ?? null},
+        ${input.actionType} ::activity_action_type,
         ${input.description},
-        ${JSON.stringify(input.metadata ?? {})}::jsonb
+        ${JSON.stringify(input.metadata ?? {})} ::jsonb
       )
       RETURNING *
     `
@@ -98,6 +103,9 @@ export class ActivityService {
     if (params.actorId && !uuidSchema.safeParse(params.actorId).success) {
       throw new Error('actorId must be a valid UUID')
     }
+    if (params.fileId && !uuidSchema.safeParse(params.fileId).success) {
+      throw new Error('fileId must be a valid UUID')
+    }
     if (
       params.actionType &&
       !activityActionTypes.includes(params.actionType as ActivityActionType)
@@ -108,19 +116,20 @@ export class ActivityService {
     const isAdmin = userRole === 'admin'
 
     const countRows = await sql`
-      SELECT COUNT(*)::int AS total_count
+      SELECT COUNT(*)::int AS count_total
         FROM activity_logs l
         LEFT JOIN contracts c ON c.id = l.contract_id
        WHERE (${isAdmin}::boolean
-              OR c.client_id = ${userId}::uuid
-              OR c.freelancer_id = ${userId}::uuid
-              OR l.actor_id = ${userId}::uuid)
+              OR c.client_id = ${userId} ::uuid
+              OR c.freelancer_id = ${userId} ::uuid
+              OR l.actor_id = ${userId} ::uuid)
          AND (${params.contractId ?? null}::uuid IS NULL OR l.contract_id = ${params.contractId ?? null}::uuid)
          AND (${params.projectId ?? null}::uuid IS NULL OR l.project_id = ${params.projectId ?? null}::uuid)
          AND (${params.actorId ?? null}::uuid IS NULL OR l.actor_id = ${params.actorId ?? null}::uuid)
+         AND (${params.fileId ?? null}::uuid IS NULL OR l.file_id = ${params.fileId ?? null}::uuid)
          AND (${params.actionType ?? null}::activity_action_type IS NULL OR l.action_type = ${params.actionType ?? null}::activity_action_type)
     `
-    const total = Number(countRows[0]?.total_count ?? 0)
+    const total = Number(countRows[0]?.count_total ?? 0)
 
     const rows = total > offset
       ? await sql`
@@ -133,12 +142,13 @@ export class ActivityService {
             LEFT JOIN users u ON u.id = l.actor_id
             LEFT JOIN projects p ON p.id = l.project_id
            WHERE (${isAdmin}::boolean
-                  OR c.client_id = ${userId}::uuid
-                  OR c.freelancer_id = ${userId}::uuid
-                  OR l.actor_id = ${userId}::uuid)
+                  OR c.client_id = ${userId} ::uuid
+                  OR c.freelancer_id = ${userId} ::uuid
+                  OR l.actor_id = ${userId} ::uuid)
              AND (${params.contractId ?? null}::uuid IS NULL OR l.contract_id = ${params.contractId ?? null}::uuid)
              AND (${params.projectId ?? null}::uuid IS NULL OR l.project_id = ${params.projectId ?? null}::uuid)
              AND (${params.actorId ?? null}::uuid IS NULL OR l.actor_id = ${params.actorId ?? null}::uuid)
+             AND (${params.fileId ?? null}::uuid IS NULL OR l.file_id = ${params.fileId ?? null}::uuid)
              AND (${params.actionType ?? null}::activity_action_type IS NULL OR l.action_type = ${params.actionType ?? null}::activity_action_type)
            ORDER BY l.created_at DESC, l.id DESC
            LIMIT ${limit}
