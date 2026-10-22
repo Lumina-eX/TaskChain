@@ -32,7 +32,9 @@ describe('DisputeResolutionPage', () => {
   beforeEach(() => {
     vi.useRealTimers()
     vi.stubGlobal('fetch', vi.fn((url: string) => {
-      const payload = url.endsWith('/evidence') ? mockEvidence : mockDispute
+      let payload: unknown = mockDispute
+      if (url.endsWith('/api/auth/me')) payload = { role: 'admin' }
+      else if (url.endsWith('/evidence')) payload = mockEvidence
       return Promise.resolve({
         ok: true,
         status: 200,
@@ -62,5 +64,35 @@ describe('DisputeResolutionPage', () => {
     expect(screen.getByText(/scope-change\.pdf/i)).toBeInTheDocument()
     expect(screen.getAllByText(/preview/i).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/download/i).length).toBeGreaterThan(0)
+  })
+
+  it('shows moderator resolution controls to admins', async () => {
+    render(<DisputeResolutionPage params={{ id: '42' }} />)
+
+    expect(await screen.findByText(/moderator resolution/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /resolve dispute/i })).toBeInTheDocument()
+  })
+
+  it('makes a resolved dispute read-only', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      let payload: unknown = {
+        ...mockDispute,
+        resolution: 'Split 60/40 in favour of the freelancer.',
+        status: 'resolved',
+      }
+      if (url.endsWith('/api/auth/me')) payload = { role: 'admin' }
+      else if (url.endsWith('/evidence')) payload = mockEvidence
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => payload,
+      }) as Promise<Response>
+    }))
+
+    render(<DisputeResolutionPage params={{ id: '42' }} />)
+
+    expect(await screen.findByText('Dispute resolved')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /submit evidence/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/moderator resolution/i)).not.toBeInTheDocument()
   })
 })

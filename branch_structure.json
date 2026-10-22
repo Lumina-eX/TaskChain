@@ -1,0 +1,18 @@
+{
+  "default_branch": "main",
+  "branches": [
+    "feat/w2-issue-255-dispute-detail-ui",
+    "main",
+    "origin"
+  ],
+  "parent": {
+    "feat/w2-issue-255-dispute-detail-ui": "main",
+    "main": null,
+    "origin": "main"
+  },
+  "order": [
+    "main",
+    "feat/w2-issue-255-dispute-detail-ui",
+    "origin"
+  ]
+}
