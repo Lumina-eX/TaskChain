@@ -197,3 +197,65 @@ export type UpdateMilestoneInput = z.infer<typeof UpdateMilestoneSchema>
 export type CreateProjectInput = z.infer<typeof CreateProjectSchema>
 export type UserProfileInput = z.infer<typeof UserProfileSchema>
 export type WalletSignatureInput = z.infer<typeof WalletSignatureSchema>
+
+// ─── Proposal ─────────────────────────────────────────────────────────────
+
+export const PROPOSAL_STATUSES = ['pending', 'accepted', 'rejected', 'withdrawn'] as const
+export const ProposalStatusSchema = z.enum(PROPOSAL_STATUSES)
+
+/** Shape of one milestone entry inside proposal.milestoneBreakdown */
+export const ProposalMilestoneSchema = z.object({
+  title: z
+    .string({ required_error: 'milestone title is required' })
+    .min(1, 'milestone title cannot be empty')
+    .max(200, 'milestone title must be 200 characters or fewer'),
+  description: z
+    .string()
+    .max(2000, 'milestone description must be 2000 characters or fewer')
+    .optional(),
+  amount: z
+    .number({ required_error: 'milestone amount is required' })
+    .positive('milestone amount must be positive'),
+  due_date: z.coerce.date().optional(),
+})
+
+export const CreateProposalSchema = z.object({
+  projectId: z
+    .string({ required_error: 'projectId is required' })
+    .uuid('projectId must be a valid UUID'),
+  coverLetter: z
+    .string({ required_error: 'coverLetter is required' })
+    .min(10, 'coverLetter must be at least 10 characters')
+    .max(5000, 'coverLetter must be 5000 characters or fewer'),
+  proposedAmount: z
+    .number({ required_error: 'proposedAmount is required' })
+    .positive('proposedAmount must be positive'),
+  currency: z.enum(['XLM', 'USDC']).default('USDC'),
+  estimatedDuration: z
+    .string()
+    .max(100, 'estimatedDuration must be 100 characters or fewer')
+    .optional(),
+  milestoneBreakdown: z
+    .array(ProposalMilestoneSchema)
+    .max(20, 'milestone breakdown cannot exceed 20 milestones')
+    .optional()
+    .default([]),
+})
+
+/**
+ * Body accepted by POST /api/proposals/[id]/accept.
+ *
+ * Currently the proposal ID comes from the URL path, so the body may be
+ * empty or carry optional metadata.  We keep the schema here for
+ * completeness and future extensibility (e.g. client notes on acceptance).
+ */
+export const AcceptProposalSchema = z.object({
+  notes: z
+    .string()
+    .max(1000, 'notes must be 1000 characters or fewer')
+    .optional(),
+})
+
+export type AcceptProposalInput = z.infer<typeof AcceptProposalSchema>
+export type CreateProposalInput = z.infer<typeof CreateProposalSchema>
+export type ProposalMilestoneInput = z.infer<typeof ProposalMilestoneSchema>
