@@ -24,6 +24,7 @@ import {
   UUIDSchema,
   withProposalAuth,
   UpdateProposalSchema,
+  acceptProposal,
   canTransition,
   deleteProposal,
   fail,
@@ -34,6 +35,7 @@ import {
   ok,
   updateProposalContent,
   updateProposalStatus,
+  rejectProposal,
   zodErrors,
 } from "@/lib/proposals";
 
@@ -85,6 +87,47 @@ export const PATCH = withProposalAuth<RouteContext>(
             `Cannot move a proposal from '${proposal.status}' to '${nextStatus}'`,
           );
         }
+
+        // ── Acceptance: atomic, single-award enforcement ──
+        // Accepting a proposal creates a contract and rejects the other
+        // proposals for the same project. This must run inside a single
+        // transaction so concurrent accept requests cannot create multiple
+        // contracts for the same project.
+        if (nextStatus === "accepted") {
+          const result = await acceptProposal(proposal, clientId);
+          if (!result.ok) {
+            if (result.reason === "CONFLICT") {
+              return failOne(
+                409,
+                "PROPOSAL_CHANGED",
+                "The proposal was modified concurrently; reload and retry",
+              );
+            }
+            if (result.reason === "ALREADY_ACCEPTED") {
+              return failOne(
+                409,
+                "PROJECT_ALREADY_AWARDED",
+                "Another proposal has already been accepted for this project",
+              );
+            }
+            return failOne(409, "INVALID_STATUS_TRANSITION", "Proposal cannot be accepted");
+          }
+          return ok(result.proposal);
+        }
+
+        // ── Rejection: recorded consistently with audit trail ──
+        if (nextStatus === "rejected") {
+          const result = await rejectProposal(proposal, clientId);
+          if (!result.ok) {
+            return failOne(
+              409,
+              "PROPOSAL_CHANGED",
+              "The proposal was modified concurrently; reload and retry",
+            );
+          }
+          return ok(result.proposal);
+        }
+
         const updated = await updateProposalStatus(proposal, nextStatus);
         if (!updated) {
           return failOne(409, "PROPOSAL_CHANGED", "The proposal was modified concurrently; reload and retry");

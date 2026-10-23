@@ -84,6 +84,8 @@ export const POST = withProposalAuth<RouteContext>(
       const proposal = await insertProposal(projectId, user.id, parsed.data);
       return ok(proposal, 201);
     } catch (err) {
+      // Concurrency: the partial unique index uq_project_proposals_active
+      // guarantees at most one active proposal per (project, freelancer).
       // Race: a concurrent insert tripped uq_project_proposals_active.
       if (isUniqueViolation(err)) {
         return failOne(
@@ -146,3 +148,4 @@ export const GET = withProposalAuth<RouteContext>(
     }
   },
 );
+
