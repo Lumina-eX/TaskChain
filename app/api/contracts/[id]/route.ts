@@ -1,9 +1,9 @@
 export const dynamic = 'force-dynamic'
 
 import { NextRequest, NextResponse } from 'next/server'
-import { withAuth } from '@/lib/auth/middleware'
-import { sql } from '@/lib/db'
-import { getUserById } from '@/lib/contracts/store'
+import { withAuth } from '-/lib/auth/middleware'
+import { sql } from '-/lib/db'
+import { getUserById } from '-/lib/contracts/store'
 
 export const GET = withAuth(async (request: NextRequest, auth) => {
   try {
@@ -107,46 +107,38 @@ export const GET = withAuth(async (request: NextRequest, auth) => {
       funding_tx_hash: escrowRaw.funding_tx_hash,
     } : null
 
-    const response = {
-      contract: {
-        id: String(contract.id),
-        job_id: String(contract.job_id),
-        job_title: contract.job_title,
-        status: contract.status,
-        total_amount: contract.total_amount,
-        currency: contract.currency,
-        terms: contract.terms,
-        contract_address: contract.contract_address,
-        created_at: contract.created_at,
-        updated_at: contract.updated_at,
-        client: client
-          ? {
-              display_name: (client as unknown as { display_name?: string | null }).display_name ?? null,
-              username: (client as unknown as { username?: string }).username ?? 'unknown',
-              avatar_url: (client as unknown as { avatar_url?: string | null }).avatar_url ?? null,
-              wallet_address: client.wallet_address,
-              avg_rating: (client as unknown as { avg_rating?: number }).avg_rating,
-              total_reviews: (client as unknown as { total_reviews?: number }).total_reviews,
-            }
-          : null,
-        freelancer: freelancer
-          ? {
-              display_name: (freelancer as unknown as { display_name?: string | null }).display_name ?? null,
-              username: (freelancer as unknown as { username?: string }).username ?? 'unknown',
-              avatar_url: (freelancer as unknown as { avatar_url?: string | null }).avatar_url ?? null,
-              wallet_address: freelancer.wallet_address,
-              avg_rating: (freelancer as unknown as { avg_rating?: number }).avg_rating,
-              total_reviews: (freelancer as unknown as { total_reviews?: number }).total_reviews,
-            }
-          : null,
-        escrow,
-        milestones: contractMilestones,
-      },
+    // Fetch file metadata associated with this contract (latest version per file)
+    let fileRows: unknown[] = []
+    try {
+      fileRows = await sql`
+        SELECT fb.id, fb.contract_id, fb.milestone_id, fb.uploader_id, fb.file_name, fb.file_type,
+               fb.file_size, fb.storage_key, fb.version, fb.created_at, fb.updated_at,
+               fb.is_deleted, fb.deleted_at
+        FROM files fb
+        WHERE fb.contract_id = ${contractId}
+          AND fb.is_deleted = false
+        ORDER BY fb.created_at DESC
+      `
+    } catch (fileError) {
+      console.error('[contracts/id] files query failed:', fileError)
+      fileRows = []
     }
 
-    return NextResponse.json(response)
+    return NextResponse.json({
+      contract: {
+        ...contract,
+        client,
+        freelancer,
+        milestones: contractMilestones,
+        escrow,
+        files: fileRows,
+      },
+    })
   } catch (error) {
-    console.error('[GET /api/contracts/[id]]', error)
-    return NextResponse.json({ error: 'Failed to load contract', code: 'SERVER_ERROR' }, { status: 500 })
+    console.error('[contracts/id] GET failed:', error)
+    return NextResponse.json(
+      { error: 'Internal server error', code: 'INTERNAL_ERROR' },
+      { status: 500 }
+    )
   }
 })
