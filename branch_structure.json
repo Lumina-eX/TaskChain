@@ -2,17 +2,20 @@
   "default_branch": "main",
   "branches": [
     "feat/issue-252-project-workspace-shared-files-ui",
+    "feat/w2-issue-255-dispute-detail-ui",
     "main",
     "origin"
   ],
   "parent": {
     "feat/issue-252-project-workspace-shared-files-ui": "main",
+    "feat/w2-issue-255-dispute-detail-ui": "main",
     "main": null,
     "origin": "main"
   },
   "order": [
     "main",
     "feat/issue-252-project-workspace-shared-files-ui",
+    "feat/w2-issue-255-dispute-detail-ui",
     "origin"
   ]
 }

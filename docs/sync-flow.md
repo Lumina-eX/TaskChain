@@ -51,6 +51,9 @@ Defines all Soroban contract events that the system listens for:
 | `dispute` | Milestone disputed                 | milestone_id                   |
 | `resolve` | Dispute resolved by arbiter        | milestone_id, release_to_freelancer |
 | `expire`  | Milestone auto-expired             | milestone_id, transfer_amount  |
+| `deadline_set` | Deadline recorded at initialization | milestone_id, deadline |
+| `deadline_expired` | Milestone expires; funds remain locked | milestone_id, deadline |
+| `deadline_extended` | Arbitrator approves extension | milestone_id, new_deadline, was_expired |
 
 ### 2. Event Mapper (`lib/contract-sync/mapper.ts`)
 
@@ -68,6 +71,9 @@ Maps each on-chain event to the corresponding database status change:
 | `dispute` | status=disputed                              | status=disputed             |
 | `resolve` | status=completed                             | status=paid                 |
 | `expire`  | -                                            | status=auto_expired         |
+| `deadline_set` | - | due_date updated |
+| `deadline_expired` | - | status=expired |
+| `deadline_extended` | - | status=extended, due_date updated |
 
 ### 3. Sync Queue (`lib/contract-sync/queue.ts`)
 
@@ -105,7 +111,7 @@ contract_sync_log (
   id                UUID PRIMARY KEY,
   contract_id       UUID REFERENCES contracts,
   milestone_id      UUID REFERENCES milestones,
-  event_type        contract_sync_event_type,  -- enum of all 10 events
+  event_type        contract_sync_event_type,  -- canonical and legacy event names
   tx_hash           TEXT,
   ledger_sequence   BIGINT,
   status            sync_status,               -- pending/processing/success/failed/dead_letter
@@ -205,7 +211,7 @@ npm test -- --reporter=verbose
 ```
 
 Unit tests cover:
-- Event mapping correctness for all 10 event types
+- Event mapping correctness for all canonical and legacy event types
 - Queue enqueue/dequeue/retry/dead letter logic, including `onRetry`/`onDeadLetter` hooks
 - Backoff delay calculation
 - Soroban event parsing

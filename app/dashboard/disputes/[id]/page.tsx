@@ -168,6 +168,10 @@ function DisputeResolutionView({ disputeId }: { disputeId: string }) {
   const [evidenceLoading, setEvidenceLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [accessDenied, setAccessDenied] = useState(false);
+  const [role, setRole] = useState<string | null>(null);
+  const [resolutionNotes, setResolutionNotes] = useState("");
+  const [isResolving, setIsResolving] = useState(false);
+  const [resolveError, setResolveError] = useState<string | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<PreviewFile[]>([]);
   const [notes, setNotes] = useState("");
@@ -209,12 +213,23 @@ function DisputeResolutionView({ disputeId }: { disputeId: string }) {
     setEvidence(Array.isArray(data.evidence) ? data.evidence : []);
   }, [disputeId]);
 
+  const fetchCurrentUser = useCallback(async () => {
+    try {
+      const res = await fetch("/api/auth/me", { credentials: "include" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setRole(typeof data?.role === "string" ? data.role : null);
+    } catch {
+      setRole(null);
+    }
+  }, []);
+
   const refreshDispute = useCallback(
     async (showLoading = false) => {
       if (showLoading) setLoading(true);
       setError(null);
       try {
-        await Promise.all([fetchDispute(), fetchEvidence()]);
+        await Promise.all([fetchDispute(), fetchEvidence(), fetchCurrentUser()]);
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unable to load dispute.";
         setError(message);
@@ -223,7 +238,7 @@ function DisputeResolutionView({ disputeId }: { disputeId: string }) {
         setEvidenceLoading(false);
       }
     },
-    [fetchDispute, fetchEvidence],
+    [fetchCurrentUser, fetchDispute, fetchEvidence],
   );
 
   useEffect(() => {
@@ -418,7 +433,39 @@ function DisputeResolutionView({ disputeId }: { disputeId: string }) {
     }
   };
 
+  const handleResolve = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const trimmed = resolutionNotes.trim();
+    if (!trimmed) {
+      setResolveError("Enter the resolution decision before submitting.");
+      return;
+    }
+
+    setIsResolving(true);
+    setResolveError(null);
+    try {
+      const res = await fetch(`/api/disputes/${disputeId}/resolve`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resolution: trimmed, newState: "resolved" }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || "Unable to record the resolution.");
+      }
+      setResolutionNotes("");
+      await refreshDispute(false);
+      toast.success("Dispute resolved.");
+    } catch (err) {
+      setResolveError(err instanceof Error ? err.message : "Unable to record the resolution.");
+    } finally {
+      setIsResolving(false);
+    }
+  };
+
   const status = statusStyles[normalizeStatus(dispute?.status)] ?? statusStyles.open;
+  const isResolved = normalizeStatus(dispute?.status) === "resolved";
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -499,6 +546,19 @@ function DisputeResolutionView({ disputeId }: { disputeId: string }) {
               </CardContent>
             </Card>
 
+            {isResolved ? (
+              <Card className="p-0">
+                <CardHeader className="border-b border-border/50">
+                  <CardTitle>Dispute resolved</CardTitle>
+                  <CardDescription>This dispute is read-only. No further evidence can be submitted.</CardDescription>
+                </CardHeader>
+                <CardContent className="py-6">
+                  <p className="text-sm text-muted-foreground">
+                    {dispute?.resolution ?? "A moderator decision has been recorded."}
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
             <form onSubmit={submitEvidence} className="space-y-6">
               <Card className="p-0">
                 <CardHeader className="border-b border-border/50">
@@ -614,6 +674,7 @@ function DisputeResolutionView({ disputeId }: { disputeId: string }) {
                 </CardFooter>
               </Card>
             </form>
+            )}
 
             <Card className="p-0">
               <CardHeader className="border-b border-border/50">
@@ -741,6 +802,38 @@ function DisputeResolutionView({ disputeId }: { disputeId: string }) {
                 </div>
               </CardContent>
             </Card>
+
+            {role === "admin" && !isResolved && (
+              <Card className="p-0">
+                <CardHeader className="border-b border-border/50">
+                  <CardTitle>Moderator resolution</CardTitle>
+                  <CardDescription>
+                    Record the final decision. This closes the dispute and makes it read-only.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-6">
+                  <form className="space-y-4" onSubmit={handleResolve}>
+                    <div className="space-y-2">
+                      <Label htmlFor="resolution-notes">Resolution decision</Label>
+                      <Textarea
+                        id="resolution-notes"
+                        rows={4}
+                        value={resolutionNotes}
+                        onChange={(event) => setResolutionNotes(event.target.value)}
+                        placeholder="Decision, rationale and any split amounts."
+                        disabled={isResolving}
+                      />
+                    </div>
+                    {resolveError && (
+                      <p className="text-sm text-destructive" role="alert">{resolveError}</p>
+                    )}
+                    <Button type="submit" disabled={isResolving}>
+                      {isResolving ? "Recording..." : "Resolve dispute"}
+                    </Button>
+                  </form>
+                </CardContent>
+              </Card>
+            )}
           </div>
         </div>
       )}

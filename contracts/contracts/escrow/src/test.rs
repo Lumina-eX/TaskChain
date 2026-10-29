@@ -2,7 +2,7 @@
 
 use super::*;
 use soroban_sdk::{
-    testutils::{Address as _, Events as _},
+    testutils::{Address as _, Events as _, Ledger as _},
     vec, Address, Env, String,
 };
 
@@ -54,7 +54,7 @@ fn setup_test() -> TestSetup {
 fn milestone(env: &Env, id: u32, amount: i128) -> Milestone {
     Milestone {
         id,
-        deadline: 0,
+        deadline: 10_000,
         amount,
         status: MilestoneStatus::Created,
         description: String::from_str(env, "Security milestone"),
@@ -64,7 +64,15 @@ fn milestone(env: &Env, id: u32, amount: i128) -> Milestone {
 }
 
 fn initialize_single_milestone(setup: &TestSetup, amount: i128) {
-    let milestones = vec![&setup.env, milestone(&setup.env, 1, amount)];
+    initialize_single_milestone_with_deadline(setup, amount, 10_000);
+}
+
+fn initialize_single_milestone_with_deadline(setup: &TestSetup, amount: i128, deadline: u64) {
+    let milestone = Milestone {
+        deadline,
+        ..milestone(&setup.env, 1, amount)
+    };
+    let milestones = vec![&setup.env, milestone];
     setup.escrow_client.initialize(
         &setup.admin,
         &setup.client,
@@ -91,7 +99,7 @@ fn test_happy_path() {
 
     let milestone_1 = Milestone {
         id: 1,
-        deadline: 0,
+        deadline: 10_000,
         amount: 100,
         status: MilestoneStatus::Created,
         description: String::from_str(&env, "Milestone 1"),
@@ -100,7 +108,7 @@ fn test_happy_path() {
     };
     let milestone_2 = Milestone {
         id: 2,
-        deadline: 0,
+        deadline: 10_000,
         amount: 200,
         status: MilestoneStatus::Created,
         description: String::from_str(&env, "Milestone 2"),
@@ -164,7 +172,7 @@ fn test_voluntary_refund() {
 
     let milestone = Milestone {
         id: 1,
-        deadline: 0,
+        deadline: 10_000,
         amount: 250,
         status: MilestoneStatus::Created,
         description: String::from_str(&env, "Project Work"),
@@ -197,7 +205,7 @@ fn test_dispute_and_resolve_to_freelancer() {
 
     let milestone = Milestone {
         id: 1,
-        deadline: 0,
+        deadline: 10_000,
         amount: 400,
         status: MilestoneStatus::Created,
         description: String::from_str(&env, "High Value Milestone"),
@@ -234,7 +242,7 @@ fn test_dispute_and_resolve_to_client() {
 
     let milestone = Milestone {
         id: 1,
-        deadline: 0,
+        deadline: 10_000,
         amount: 400,
         status: MilestoneStatus::Created,
         description: String::from_str(&env, "High Value Milestone"),
@@ -271,7 +279,7 @@ fn test_double_initialization_fails() {
 
     let milestone = Milestone {
         id: 1,
-        deadline: 0,
+        deadline: 10_000,
         amount: 100,
         status: MilestoneStatus::Created,
         description: String::from_str(&env, "Milestone"),
@@ -294,7 +302,7 @@ fn test_zero_amount_fails() {
 
     let milestone = Milestone {
         id: 1,
-        deadline: 0,
+        deadline: 10_000,
         amount: 0, // Zero amount
         status: MilestoneStatus::Created,
         description: String::from_str(&env, "Invalid Milestone"),
@@ -315,7 +323,7 @@ fn test_unauthorized_release_fails() {
 
     let milestone = Milestone {
         id: 1,
-        deadline: 0,
+        deadline: 10_000,
         amount: 100,
         status: MilestoneStatus::Created,
         description: String::from_str(&env, "Milestone"),
@@ -342,7 +350,7 @@ fn test_version() {
 
     let milestone = Milestone {
         id: 1,
-        deadline: 0,
+        deadline: 10_000,
         amount: 100,
         status: MilestoneStatus::Created,
         description: String::from_str(&env, "Milestone"),
@@ -365,7 +373,7 @@ fn test_release_without_approval_fails() {
 
     let milestone = Milestone {
         id: 1,
-        deadline: 0,
+        deadline: 10_000,
         amount: 100,
         status: MilestoneStatus::Created,
         description: String::from_str(&env, "Milestone"),
@@ -391,7 +399,7 @@ fn test_double_client_approval_fails() {
 
     let milestone = Milestone {
         id: 1,
-        deadline: 0,
+        deadline: 10_000,
         amount: 100,
         status: MilestoneStatus::Created,
         description: String::from_str(&env, "Milestone"),
@@ -418,7 +426,7 @@ fn test_double_freelancer_confirmation_fails() {
 
     let milestone = Milestone {
         id: 1,
-        deadline: 0,
+        deadline: 10_000,
         amount: 100,
         status: MilestoneStatus::Created,
         description: String::from_str(&env, "Milestone"),
@@ -445,7 +453,7 @@ fn test_dispute_clears_approvals() {
 
     let milestone = Milestone {
         id: 1,
-        deadline: 0,
+        deadline: 10_000,
         amount: 400,
         status: MilestoneStatus::Created,
         description: String::from_str(&env, "High Value Milestone"),
@@ -568,9 +576,8 @@ fn test_successful_security_events_are_emitted() {
             .filter_by_contract(&setup.escrow_client.address)
             .events()
             .len(),
-        1
+        2
     );
-
     setup.escrow_client.fund();
     assert_eq!(
         env.events()
@@ -760,5 +767,230 @@ fn test_dispute_events_are_emitted() {
             .events()
             .len(),
         1
+    );
+}
+
+#[test]
+fn test_deadline_is_set_and_expiry_locks_funds_until_client_refund() {
+    let setup = setup_test();
+    initialize_single_milestone_with_deadline(&setup, 150, 100);
+    let token_client = token::Client::new(&setup.env, &setup.token_address);
+    assert_eq!(
+        setup
+            .env
+            .events()
+            .all()
+            .filter_by_contract(&setup.escrow_client.address)
+            .events()
+            .len(),
+        2
+    );
+    assert_eq!(setup.escrow_client.get_milestone_deadline(&1), 100);
+
+    setup.escrow_client.fund();
+    setup.env.ledger().set_timestamp(101);
+    setup.escrow_client.auto_expire(&setup.client, &1);
+
+    assert_eq!(
+        setup.escrow_client.get_milestones().get(0).unwrap().status,
+        MilestoneStatus::Expired
+    );
+    assert_eq!(setup.escrow_client.get_escrow_balance(), 150);
+    assert_eq!(token_client.balance(&setup.client), 850);
+    assert_eq!(token_client.balance(&setup.escrow_client.address), 150);
+
+    setup.escrow_client.refund(&1, &setup.client);
+    assert_eq!(
+        setup.escrow_client.get_milestones().get(0).unwrap().status,
+        MilestoneStatus::Refunded
+    );
+    assert_eq!(setup.escrow_client.get_escrow_balance(), 0);
+    assert_eq!(token_client.balance(&setup.client), 1000);
+}
+
+#[test]
+fn test_expired_milestone_can_be_extended_only_with_arbiter_approval() {
+    let setup = setup_test();
+    initialize_single_milestone_with_deadline(&setup, 150, 100);
+    setup.escrow_client.fund();
+    setup.env.ledger().set_timestamp(101);
+    setup.escrow_client.auto_expire(&setup.client, &1);
+
+    setup
+        .escrow_client
+        .request_deadline_extension(&1, &200, &setup.client);
+    setup.escrow_client.approve_deadline_extension(&1);
+
+    assert_eq!(setup.escrow_client.get_milestone_deadline(&1), 200);
+    assert_eq!(
+        setup.escrow_client.get_milestones().get(0).unwrap().status,
+        MilestoneStatus::Extended
+    );
+
+    setup.escrow_client.start_milestone(&1);
+    setup.escrow_client.submit_milestone(&1);
+    assert_eq!(
+        setup.escrow_client.get_milestones().get(0).unwrap().status,
+        MilestoneStatus::Submitted
+    );
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #7)")]
+fn test_unauthorized_user_cannot_request_deadline_extension() {
+    let setup = setup_test();
+    initialize_single_milestone_with_deadline(&setup, 150, 100);
+
+    let stranger = Address::generate(&setup.env);
+    setup
+        .escrow_client
+        .request_deadline_extension(&1, &200, &stranger);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #13)")]
+fn test_deadline_extension_cannot_shorten_deadline() {
+    let setup = setup_test();
+    initialize_single_milestone_with_deadline(&setup, 150, 100);
+    setup.escrow_client.fund();
+
+    setup
+        .escrow_client
+        .request_deadline_extension(&1, &99, &setup.client);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #11)")]
+fn test_approval_is_rejected_after_deadline() {
+    let setup = setup_test();
+    initialize_single_milestone_with_deadline(&setup, 150, 100);
+    setup.escrow_client.fund();
+    setup.escrow_client.start_milestone(&1);
+    setup.escrow_client.submit_milestone(&1);
+    setup.env.ledger().set_timestamp(101);
+
+    setup.escrow_client.approve(&1);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #11)")]
+fn test_release_is_rejected_after_deadline() {
+    let setup = setup_test();
+    initialize_single_milestone_with_deadline(&setup, 150, 100);
+    setup.escrow_client.fund();
+    setup.escrow_client.start_milestone(&1);
+    setup.escrow_client.submit_milestone(&1);
+    setup.escrow_client.approve(&1);
+    setup.env.ledger().set_timestamp(101);
+
+    setup.escrow_client.release(&1, &setup.client);
+}
+
+#[test]
+fn test_dispute_can_be_raised_after_deadline() {
+    let setup = setup_test();
+    initialize_single_milestone_with_deadline(&setup, 150, 100);
+    setup.escrow_client.fund();
+    setup.escrow_client.start_milestone(&1);
+    setup.escrow_client.submit_milestone(&1);
+    setup.env.ledger().set_timestamp(101);
+
+    setup.escrow_client.dispute(&1, &setup.client);
+
+    assert_eq!(
+        setup.escrow_client.get_milestones().get(0).unwrap().status,
+        MilestoneStatus::Disputed
+    );
+    assert_eq!(setup.escrow_client.get_escrow_balance(), 150);
+}
+
+#[test]
+fn test_simultaneously_expired_milestones_are_independently_refundable() {
+    let setup = setup_test();
+    let milestones = vec![
+        &setup.env,
+        Milestone {
+            id: 1,
+            deadline: 100,
+            amount: 100,
+            status: MilestoneStatus::Created,
+            description: String::from_str(&setup.env, "First"),
+            client_approved: false,
+            freelancer_approved: false,
+        },
+        Milestone {
+            id: 2,
+            deadline: 100,
+            amount: 200,
+            status: MilestoneStatus::Created,
+            description: String::from_str(&setup.env, "Second"),
+            client_approved: false,
+            freelancer_approved: false,
+        },
+    ];
+    setup.escrow_client.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &setup.token_address,
+        &milestones,
+    );
+    setup.escrow_client.fund();
+    setup.env.ledger().set_timestamp(101);
+
+    setup.escrow_client.auto_expire(&setup.client, &1);
+    setup.escrow_client.auto_expire(&setup.client, &2);
+    assert_eq!(setup.escrow_client.get_escrow_balance(), 300);
+
+    setup.escrow_client.refund(&1, &setup.client);
+    setup.escrow_client.refund(&2, &setup.client);
+    assert_eq!(setup.escrow_client.get_escrow_balance(), 0);
+    assert_eq!(
+        setup.escrow_client.get_milestones().get(0).unwrap().status,
+        MilestoneStatus::Refunded
+    );
+    assert_eq!(
+        setup.escrow_client.get_milestones().get(1).unwrap().status,
+        MilestoneStatus::Refunded
+    );
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #13)")]
+fn test_initialization_rejects_missing_deadline() {
+    let setup = setup_test();
+    let milestones = vec![&setup.env, milestone(&setup.env, 1, 100)];
+    let invalid = Milestone {
+        deadline: 0,
+        ..milestones.get(0).unwrap()
+    };
+    setup.escrow_client.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &setup.token_address,
+        &vec![&setup.env, invalid],
+    );
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #15)")]
+fn test_duplicate_milestone_ids_are_rejected() {
+    let setup = setup_test();
+    let milestones = vec![
+        &setup.env,
+        milestone(&setup.env, 1, 100),
+        milestone(&setup.env, 1, 200),
+    ];
+
+    setup.escrow_client.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &setup.token_address,
+        &milestones,
     );
 }
