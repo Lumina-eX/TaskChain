@@ -2,6 +2,7 @@ import { sql } from '@/lib/db'
 import { SorobanEventListener } from './listener'
 import { SyncQueue } from './queue'
 import { mapEventToAction } from './mapper'
+import type { MilestoneStatusUpdate } from './mapper'
 import { buildSyncDedupeKey } from './types'
 import type { SorobanEventPayload, SyncStatus, SorobanContractEvent } from './types'
 
@@ -166,7 +167,7 @@ export class ContractSyncService {
       if (action.milestoneUpdate && action.milestoneId != null) {
         const milestoneDbId = await this.resolveMilestoneDbId(contractId, action.milestoneId)
         if (milestoneDbId) {
-          await this.applyMilestoneUpdate(milestoneDbId, action.milestoneUpdate as unknown as Record<string, string | null | undefined>)
+          await this.applyMilestoneUpdate(milestoneDbId, action.milestoneUpdate)
         }
       }
     }
@@ -223,7 +224,7 @@ export class ContractSyncService {
 
   private async applyMilestoneUpdate(
     milestoneId: string,
-    update: Record<string, string | null | undefined>
+    update: MilestoneStatusUpdate
   ): Promise<void> {
     const sets: string[] = ['updated_at = NOW()']
 
@@ -232,6 +233,8 @@ export class ContractSyncService {
       const dbField = this.fieldToDbColumnMilestone(field)
       if (value === null) {
         sets.push(`${dbField} = NULL`)
+      } else if (typeof value === 'boolean') {
+        sets.push(`${dbField} = ${value ? 'TRUE' : 'FALSE'}`)
       } else {
         const escaped = value.replace(/'/g, "''")
         sets.push(`${dbField} = '${escaped}'`)
@@ -334,6 +337,10 @@ export class ContractSyncService {
       submittedAt: 'submitted_at',
       approvedAt: 'approved_at',
       paidAt: 'paid_at',
+      dueDate: 'due_date',
+      isOverdue: 'is_overdue',
+      overdueAt: 'overdue_at',
+      reminderSentAt: 'reminder_sent_at',
       releaseTxHash: 'release_tx_hash',
       rejectionReason: 'rejection_reason',
     }

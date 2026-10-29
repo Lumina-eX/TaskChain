@@ -108,6 +108,38 @@ describe('mapEventToAction', () => {
     expect(action.milestoneId).toBe(1)
   })
 
+  it('maps deadline_set to a milestone due date', () => {
+    const action = mapEventToAction('deadline_set', makePayload({
+      event: 'deadline_set',
+      milestoneId: 3,
+      deadline: 2_000_000_000,
+    }))
+    expect(action.kind).toBe('update_milestone')
+    expect(action.milestoneUpdate?.dueDate).toBe('2033-05-18T03:33:20.000Z')
+    expect(action.milestoneId).toBe(3)
+  })
+
+  it('maps deadline_expired to the expired milestone state', () => {
+    const action = mapEventToAction('deadline_expired', makePayload({
+      event: 'deadline_expired',
+      milestoneId: 3,
+    }))
+    expect(action.milestoneUpdate?.status).toBe('expired')
+    expect(action.milestoneId).toBe(3)
+  })
+
+  it('maps deadline_extended to an extended milestone and its new due date', () => {
+    const action = mapEventToAction('deadline_extended', makePayload({
+      event: 'deadline_extended',
+      milestoneId: 3,
+      deadline: 2_000_000_000,
+      wasExpired: true,
+    }))
+    expect(action.milestoneUpdate?.status).toBe('extended')
+    expect(action.milestoneUpdate?.dueDate).toBe('2033-05-18T03:33:20.000Z')
+    expect(action.milestoneUpdate?.isOverdue).toBe(false)
+  })
+
   it('handles unknown event as noop', () => {
     const payload = makePayload({ event: 'unknown' as any })
     const action = mapEventToAction('unknown' as any, payload)

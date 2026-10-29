@@ -3,16 +3,19 @@
   "branches": [
     "main",
     "origin",
-    "security/issue-244-project-workspace-file-metadata-api"
+    "security/issue-244-project-workspace-file-metadata-api",
+    "feat/w2-issue-255-dispute-detail-ui"
   ],
   "parent": {
     "main": null,
     "origin": "main",
-    "security/issue-244-project-workspace-file-metadata-api": "main"
+    "security/issue-244-project-workspace-file-metadata-api": "main",
+    "feat/w2-issue-255-dispute-detail-ui": "main"
   },
   "order": [
     "main",
     "origin",
-    "security/issue-244-project-workspace-file-metadata-api"
+    "security/issue-244-project-workspace-file-metadata-api",
+    "feat/w2-issue-255-dispute-detail-ui"
   ]
 }

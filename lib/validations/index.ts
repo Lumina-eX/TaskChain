@@ -98,8 +98,8 @@ export const ListProjectsSchema = z.object({
 
 // ─── Milestone ─────────────────────────────────────────────────────────────
 
-const MILESTONE_STATUSES = ['pending', 'in_progress', 'submitted', 'approved', 'paid', 'disputed'] as const
-const IMMUTABLE_MILESTONE_STATUSES = ['submitted', 'approved', 'paid'] as const
+const MILESTONE_STATUSES = ['pending', 'in_progress', 'submitted', 'approved', 'paid', 'disputed', 'expired', 'extended', 'auto_expired', 'refunded'] as const
+const IMMUTABLE_MILESTONE_STATUSES = ['submitted', 'approved', 'paid', 'disputed', 'expired', 'extended', 'auto_expired', 'refunded'] as const
 
 export const MilestoneStatusSchema = z.enum(MILESTONE_STATUSES)
 

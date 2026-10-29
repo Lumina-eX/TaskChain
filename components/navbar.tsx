@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
-import { Menu, X, Wallet, User, Settings, LogOut, ChevronDown, AlertTriangle } from 'lucide-react'
+import { Menu, X, Wallet, User, Settings, LogOut, ChevronDown, AlertTriangle, Scale } from 'lucide-react'
 import { useState } from 'react'
 import { ThemeToggle } from './ui/ThemeToggle'
 import {
@@ -174,6 +174,14 @@ export function Navbar() {
                       <User className="h-4 w-4" />
                       <span>My Profile</span>
                     </Link>
+                    <Link
+                      href="/dashboard/disputes"
+                      className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                      onClick={closeMenus}
+                    >
+                      <Scale className="h-4 w-4" />
+                      <span>Disputes</span>
+                    </Link>
                     <Link 
                       href="/settings" 
                       className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
@@ -257,6 +265,9 @@ export function Navbar() {
 
                   <Button variant="ghost" className="w-full justify-start gap-2" asChild onClick={closeMenus}>
                     <Link href="/dashboard/profile"><User className="h-4 w-4" /> Profile</Link>
+                  </Button>
+                  <Button variant="ghost" className="w-full justify-start gap-2" asChild onClick={closeMenus}>
+                    <Link href="/dashboard/disputes"><Scale className="h-4 w-4" /> Disputes</Link>
                   </Button>
                   <Button
                     id="mobile-disconnect-wallet"

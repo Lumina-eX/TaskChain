@@ -13,6 +13,7 @@ import {
   Settings,
   MessageSquare,
   Banknote,
+  ShieldCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -57,6 +58,11 @@ const navItems = [
     label: 'Profile',
     href: '/dashboard/profile',
     icon: UserCircle,
+  },
+  {
+    label: 'Security',
+    href: '/dashboard/security',
+    icon: ShieldCheck,
   },
   {
     label: 'Settings',
