@@ -465,6 +465,8 @@ export async function updateProposalStatus(
   current: Proposal,
   next: ProposalStatus,
 ): Promise<Proposal | null> {
+  if (next === "accepted") return acceptProposal(current);
+
   const rows = (await sql`
     UPDATE project_proposals
     SET status = ${next}::proposal_status,
@@ -487,4 +489,70 @@ export async function deleteProposal(proposal: Proposal): Promise<boolean> {
   `) as Array<Record<string, unknown>>;
   if (rows.length) invalidateProjectProposals(proposal.projectId);
   return rows.length > 0;
+}
+
+
+/**
+ * Issue #217 - accepts a proposal and, in ONE atomic statement, creates the
+ * contract (pending_funding, escrow unfunded), its milestones from the
+ * proposal breakdown, and an audit row. Any failing step rolls all of it back.
+ * Returns null if the proposal/project is no longer eligible (409 upstream).
+ * A concurrent double-accept hits uq_project_proposals_one_accepted (23505).
+ */
+export async function acceptProposal(
+  current: Proposal,
+): Promise<(Proposal & { contractId: string }) | null> {
+  const rows = (await sql`
+    WITH p AS (
+      UPDATE project_proposals pp
+      SET status = 'accepted'::proposal_status, updated_at = NOW()
+      FROM projects pr
+      WHERE pp.id = ${current.id}
+        AND pp.status = ${current.status}::proposal_status
+        AND pr.id = pp.project_id
+        AND pr.status::text IN ('open', 'active')
+        AND NOT EXISTS (
+          SELECT 1 FROM contracts c
+          WHERE c.project_id = pp.project_id AND c.status::text <> 'cancelled'
+        )
+      RETURNING pp.*, pr.client_id AS project_client_id
+    ), c AS (
+      INSERT INTO contracts
+        (project_id, client_id, freelancer_id, proposal_id, total_amount, status, escrow_status)
+      SELECT project_id, project_client_id, freelancer_id, id, budget,
+             'pending_funding'::contract_status, 'unfunded'::escrow_status
+      FROM p
+      RETURNING id, project_id
+    ), m AS (
+      INSERT INTO milestones
+        (project_id, contract_id, title, sort_order, amount, due_date)
+      SELECT c.project_id, c.id, e.value->>'title', (e.ord - 1)::smallint,
+             (e.value->>'amount')::numeric,
+             CASE WHEN e.value ? 'dueInDays'
+                  THEN NOW() + ((e.value->>'dueInDays')::int * INTERVAL '1 day') END
+      FROM c, p, jsonb_array_elements(p.milestones) WITH ORDINALITY AS e(value, ord)
+      RETURNING id
+    ), a AS (
+      INSERT INTO contract_state_logs
+        (contract_id, previous_status, new_status, changed_by_user_id, reason)
+      SELECT c.id, NULL, 'pending_funding'::contract_status, p.project_client_id,
+             'Proposal ' || p.id || ' accepted; contract created; escrow initialised (unfunded)'
+      FROM c, p
+      RETURNING id
+    ), l AS (
+      INSERT INTO proposal_acceptance_audit_logs
+        (event, proposal_id, contract_id, actor_id, metadata)
+      SELECT ev.event, p.id, c.id, p.project_client_id,
+             jsonb_build_object('project_id', p.project_id)
+      FROM p, c,
+           (VALUES ('proposal_accepted'), ('contract_created'), ('escrow_initialized')) AS ev(event)
+      RETURNING id
+    )
+    SELECT p.*, c.id AS contract_id FROM p, c
+  `) as Array<Record<string, unknown>>;
+  if (!rows.length) return null;
+  invalidateProjectProposals(current.projectId);
+  return Object.assign(rowToProposal(rows[0]), {
+    contractId: String(rows[0].contract_id),
+  });
 }
