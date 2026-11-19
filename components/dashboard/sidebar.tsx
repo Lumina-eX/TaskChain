@@ -14,6 +14,7 @@ import {
   MessageSquare,
   Banknote,
   ShieldCheck,
+  CalendarDays,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -53,6 +54,11 @@ const navItems = [
     label: 'Messages',
     href: '/dashboard/messages',
     icon: MessageSquare,
+  },
+  {
+    label: 'Calendar',
+    href: '/dashboard/calendar',
+    icon: CalendarDays,
   },
   {
     label: 'Profile',
