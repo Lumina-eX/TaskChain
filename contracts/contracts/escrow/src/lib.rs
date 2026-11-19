@@ -47,6 +47,7 @@ pub enum DataKey {
     EscrowBalance,
     PendingDeadline(u32),
     ExpiredFrom(u32),
+    AllowedToken(Address),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -85,6 +86,8 @@ pub enum Error {
     DuplicateMilestoneId = 15,
     /// ERR_INSUFFICIENT_BALANCE
     InsufficientBalance = 16,
+    /// ERR_TOKEN_NOT_ALLOWED
+    TokenNotAllowed = 17,
 }
 
 /// Standardized event schemas. Topics are indexed by Soroban RPC consumers;
@@ -109,6 +112,17 @@ pub struct EscrowFunded {
     #[topic]
     pub actor: Address,
     pub amount: i128,
+}
+
+#[contractevent]
+pub struct TokenAllowlistUpdated {
+    #[topic]
+    pub contract_id: Address,
+    #[topic]
+    pub actor: Address,
+    pub token: Address,
+    pub allowed: bool,
+    pub timestamp: u64,
 }
 
 #[contractevent]
@@ -291,6 +305,11 @@ fn mark_milestone_expired(
 #[contract]
 pub struct EscrowContract;
 
+fn require_allowed_token(env: &Env, token: &Address) -> Result<(), Error> {
+    let allowed: bool = env.storage().instance().get(&DataKey::AllowedToken(token.clone())).unwrap_or(false);
+    if allowed { Ok(()) } else { Err(Error::TokenNotAllowed) }
+}
+
 #[contractimpl]
 impl EscrowContract {
     pub fn initialize(
@@ -307,6 +326,8 @@ impl EscrowContract {
         if env.storage().instance().has(&DataKey::Client) {
             return Err(Error::AlreadyInitialized);
         }
+
+        require_allowed_token(&env, &token)?;
 
         if milestones.is_empty() {
             return Err(Error::MilestoneNotFound);
@@ -372,9 +393,34 @@ impl EscrowContract {
         Ok(())
     }
 
+    pub fn set_token_allowed(env: Env, token: Address, allowed: bool) -> Result<(), Error> {
+        let admin: Address = env.storage().instance().get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
+        admin.require_auth();
+
+        env.storage().instance().set(&DataKey::AllowedToken(token.clone()), &allowed);
+
+        TokenAllowlistUpdated {
+            contract_id: env.current_contract_address(),
+            actor: admin,
+            token,
+            allowed,
+            timestamp: env.ledger().timestamp(),
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
+    pub fn is_token_allowed(env: Env, token: Address) -> bool {
+        env.storage().instance().get(&DataKey::AllowedToken(token)).unwrap_or(false)
+    }
+
     pub fn fund(env: Env) -> Result<(), Error> {
         let client: Address = env.storage().instance().get(&DataKey::Client).ok_or(Error::NotInitialized)?;
         client.require_auth();
+
+        let token_address: Address = env.storage().instance().get(&DataKey::Token).ok_or(Error::NotInitialized)?;
+        require_allowed_token(&env, &token_address)?;
 
         let is_already_funded: bool = env.storage().instance().get(&DataKey::IsFunded).unwrap_or(false);
         if is_already_funded {
