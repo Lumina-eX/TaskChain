@@ -198,6 +198,115 @@ fn test_voluntary_refund() {
 }
 
 #[test]
+fn test_permissionless_state_queries_track_funding_release_and_refund() {
+    let setup = setup_test();
+    let env = setup.env.clone();
+    let milestones = vec![
+        &env,
+        milestone(&env, 1, 100),
+        milestone(&env, 2, 200),
+    ];
+    setup.escrow_client.initialize(
+        &setup.admin,
+        &setup.client,
+        &setup.freelancer,
+        &setup.arbiter,
+        &setup.token_address,
+        &milestones,
+    );
+
+    let created = setup.escrow_client.get_escrow_state();
+    assert_eq!(created.client, setup.client);
+    assert_eq!(created.freelancer, setup.freelancer);
+    assert_eq!(created.arbiter, setup.arbiter);
+    assert_eq!(created.token, setup.token_address);
+    assert_eq!(created.allocated_amount, 300);
+    assert_eq!(created.released_amount, 0);
+    assert_eq!(created.refunded_amount, 0);
+    assert_eq!(created.remaining_balance, 0);
+    assert_eq!(created.status, EscrowStatus::Created);
+
+    let event_count = env.events().all().filter_by_contract(&setup.contract_id).events().len();
+    assert_eq!(setup.escrow_client.get_escrow_state(), created);
+    assert_eq!(
+        setup.escrow_client.get_milestone_state(&1).remaining_amount,
+        100
+    );
+    assert_eq!(env.events().all().filter_by_contract(&setup.contract_id).events().len(), event_count);
+
+    setup.escrow_client.fund();
+    let funded = setup.escrow_client.get_escrow_state();
+    assert_eq!(funded.status, EscrowStatus::Funded);
+    assert_eq!(funded.remaining_balance, 300);
+
+    setup.escrow_client.start_milestone(&1);
+    setup.escrow_client.submit_milestone(&1);
+    setup.escrow_client.approve(&1);
+    assert_eq!(
+        setup.escrow_client.get_escrow_state().status,
+        EscrowStatus::Approved
+    );
+    setup.escrow_client.release(&1, &setup.client);
+
+    let partially_settled = setup.escrow_client.get_escrow_state();
+    assert_eq!(partially_settled.status, EscrowStatus::PartiallySettled);
+    assert_eq!(partially_settled.released_amount, 100);
+    assert_eq!(partially_settled.refunded_amount, 0);
+    assert_eq!(partially_settled.remaining_balance, 200);
+    assert_eq!(
+        setup.escrow_client.get_milestone_state(&1).released_amount,
+        100
+    );
+
+    setup.escrow_client.refund(&2, &setup.freelancer);
+    let completed = setup.escrow_client.get_escrow_state();
+    assert_eq!(completed.status, EscrowStatus::Completed);
+    assert_eq!(completed.released_amount, 100);
+    assert_eq!(completed.refunded_amount, 200);
+    assert_eq!(completed.remaining_balance, 0);
+    assert_eq!(
+        setup.escrow_client.get_milestone_state(&2).refunded_amount,
+        200
+    );
+}
+
+#[test]
+fn test_state_query_reports_dispute_resolution_recipient_and_invalid_ids() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 150);
+    setup.escrow_client.fund();
+    setup.escrow_client.start_milestone(&1);
+    setup.escrow_client.submit_milestone(&1);
+    setup.escrow_client.dispute(&1, &setup.client);
+    assert_eq!(
+        setup.escrow_client.get_escrow_state().status,
+        EscrowStatus::Disputed
+    );
+
+    setup.escrow_client.resolve_dispute(&1, &false);
+    let state = setup.escrow_client.get_escrow_state();
+    assert_eq!(state.status, EscrowStatus::Completed);
+    assert_eq!(state.released_amount, 0);
+    assert_eq!(state.refunded_amount, 150);
+    assert_eq!(state.remaining_balance, 0);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #5)")]
+fn test_state_query_rejects_nonexistent_milestone() {
+    let setup = setup_test();
+    initialize_single_milestone(&setup, 150);
+    setup.escrow_client.get_milestone_state(&99);
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #2)")]
+fn test_state_query_rejects_uninitialized_escrow() {
+    let setup = setup_test();
+    setup.escrow_client.get_escrow_state();
+}
+
+#[test]
 fn test_dispute_and_resolve_to_freelancer() {
     let setup = setup_test();
     let escrow = setup.escrow_client;
@@ -232,6 +341,8 @@ fn test_dispute_and_resolve_to_freelancer() {
     assert_eq!(token_client.balance(&setup.freelancer), 400);
     assert_eq!(token_client.balance(&setup.client), 600);
     assert_eq!(escrow.get_milestones().get(0).unwrap().status, MilestoneStatus::Resolved);
+    assert_eq!(escrow.get_escrow_state().released_amount, 400);
+    assert_eq!(escrow.get_escrow_state().refunded_amount, 0);
 }
 
 #[test]
