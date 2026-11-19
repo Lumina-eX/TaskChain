@@ -5,6 +5,7 @@ import { withAuth } from '@/lib/auth/middleware'
 import { sql } from '@/lib/db'
 import { UpdateMilestoneSchema, IMMUTABLE_MILESTONE_STATUS_VALUES } from '@/lib/validations'
 import { activityService } from '@/lib/activity'
+import { ensureBaselineRevision, recordContractRevision } from '@/lib/contracts/revisions'
 
 export const GET = withAuth(async (request: NextRequest, auth) => {
   const id = request.nextUrl.pathname.split('/').at(-1)
@@ -83,6 +84,13 @@ export const PATCH = withAuth(async (request: NextRequest, auth) => {
       )
     }
 
+    // Capture the pre-update state so the revision history has something to diff against.
+    if (milestone.contract_id) {
+      await ensureBaselineRevision(milestone.contract_id).catch((err: unknown) =>
+        console.error('[revisions] Failed to record baseline revision:', err),
+      )
+    }
+
     const [updated] = await sql`
       UPDATE milestones SET
         title        = COALESCE(${title ?? null}, title),
@@ -105,6 +113,15 @@ export const PATCH = withAuth(async (request: NextRequest, auth) => {
       description: `Milestone "${updated.title}" updated`,
       metadata: { previousTitle: milestone.title },
     }).catch((err: unknown) => console.error('[activity] Failed to log milestone_updated:', err))
+
+    if (milestone.contract_id) {
+      await recordContractRevision(milestone.contract_id, {
+        id: user.id,
+        walletAddress: auth.walletAddress,
+      }).catch((err: unknown) =>
+        console.error('[revisions] Failed to record contract revision:', err),
+      )
+    }
 
     return NextResponse.json({ milestone: updated })
   } catch {

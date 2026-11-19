@@ -13,6 +13,7 @@ import { ContractEscrowSummary } from "@/components/dashboard/contract-escrow-su
 import { EscrowStatusTracker, type EscrowStage } from "@/components/dashboard/escrow-status-tracker";
 import { EscrowFundingDialog } from "@/components/dashboard/escrow-funding-dialog";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
+import { ContractRevisionHistory } from "@/components/dashboard/contract-revision-history";
 
 interface ProfileInfo {
   display_name: string | null;
@@ -229,6 +230,9 @@ export default function ContractDetailPage() {
 
         {/* Contract Activity Timeline */}
         <ActivityTimeline contractId={contract.id} />
+
+        {/* Contract Revision & Change History */}
+        <ContractRevisionHistory contractId={contract.id} />
       </div>
 
       {/* Escrow Funding Dialog */}
