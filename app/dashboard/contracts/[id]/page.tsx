@@ -3,16 +3,16 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Loader2, AlertCircle, Star, ShieldCheck, Wallet, User } from "lucide-react";
+import { ArrowLeft, Loader2, AlertCircle, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { ProfileCard } from "@/components/dashboard/profile-card";
 import { ContractMilestoneList, type ContractMilestone } from "@/components/dashboard/contract-milestone-list";
 import { ContractEscrowSummary } from "@/components/dashboard/contract-escrow-summary";
-import { EscrowStatusTracker, type EscrowStage } from "@/components/dashboard/escrow-status-tracker";
 import { EscrowFundingDialog } from "@/components/dashboard/escrow-funding-dialog";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
+import { calculateFundingBreakdown, formatAssetAmount } from "@/lib/escrow/funding";
 
 interface ProfileInfo {
   display_name: string | null;
@@ -54,11 +54,6 @@ const contractStatusConfig: Record<string, { label: string; color: string; textC
   completed: { label: "Completed", color: "bg-accent/20", textColor: "text-accent" },
   cancelled: { label: "Cancelled", color: "bg-muted", textColor: "text-muted-foreground" },
   disputed: { label: "Disputed", color: "bg-destructive/20", textColor: "text-destructive" },
-};
-
-const escrowStageMap: Record<string, EscrowStage> = {
-  draft: "Funded", open: "Funded", in_progress: "In Progress",
-  completed: "Released", disputed: "In Progress",
 };
 
 function getAuthHeaders(): Record<string, string> {
@@ -146,7 +141,6 @@ export default function ContractDetailPage() {
   }
 
   const statusCfg = contractStatusConfig[contract.status] ?? contractStatusConfig.pending;
-  const escrowStage = escrowStageMap[contract.status] ?? "Funded";
   const clientBadge = (
     <Badge variant="outline" className="text-[10px] text-accent border-accent/20 bg-accent/5">Owner</Badge>
   );
@@ -212,7 +206,7 @@ export default function ContractDetailPage() {
             </div>
           </Card>
           <div className="md:col-span-2">
-            <ContractEscrowSummary escrow={contract.escrow} currency={contract.currency} />
+            <ContractEscrowSummary escrow={contract.escrow ?? null} currency={contract.currency} />
             {canFund && (
               <div className="mt-4 flex justify-end">
                 <Button 
@@ -227,6 +221,25 @@ export default function ContractDetailPage() {
           </div>
         </div>
 
+        {/* Milestone Allocations */}
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-xl font-semibold tracking-tight">Milestone Allocations</h2>
+            <span className="text-sm text-muted-foreground">
+              {formatAssetAmount(
+                calculateFundingBreakdown({
+                  totalValue: contract.total_amount,
+                  milestones: contract.milestones,
+                  currency: contract.currency,
+                }).allocationTotal,
+                contract.currency
+              )}{" "}
+              allocated
+            </span>
+          </div>
+          <ContractMilestoneList milestones={contract.milestones} />
+        </div>
+
         {/* Contract Activity Timeline */}
         <ActivityTimeline contractId={contract.id} />
       </div>
@@ -239,6 +252,9 @@ export default function ContractDetailPage() {
         contractAddress={contract.escrow?.escrow_address ?? null}
         requiredAmount={contract.total_amount}
         currency={contract.currency}
+        milestones={contract.milestones}
+        fundedAmount={contract.escrow?.funded_amount ?? 0}
+        networkPassphrase={contract.escrow?.network_passphrase ?? null}
         onFundingSuccess={handleFundingSuccess}
       />
     </div>
