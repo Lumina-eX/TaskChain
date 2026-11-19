@@ -1,6 +1,6 @@
 # TaskChain Mainnet Deployment Guide
 
-**Version**: 1.0  
+**Version**: 1.1  
 **Date**: 2026-06-24  
 **Status**: Draft
 
@@ -9,6 +9,8 @@
 ## Overview
 
 This guide provides step-by-step instructions for deploying TaskChain to the Stellar mainnet. It covers pre-deployment preparation, the deployment process, post-deployment validation, and emergency procedures.
+
+Smart contract deployments (Soroban escrow) must additionally follow the [Soroban Escrow Deployment Verification](#soroban-escrow-deployment-verification--reproducibility) procedures below, which define reproducible builds, artifact traceability, and auditable deployment records for both Testnet and Mainnet.
 
 ---
 
@@ -47,6 +49,7 @@ This guide provides step-by-step instructions for deploying TaskChain to the Ste
 ### 2. Smart Contract Preparation
 - [ ] Smart contract audited by reputable firm
 - [ ] Contract source code verified on Stellar explorer
+- [ ] Build reproduced from pinned toolchain and WASM hash matches the recorded artifact
 - [ ] Contract deployed to mainnet
 - [ ] Contract tested on mainnet with small amounts
 - [ ] Emergency stop functionality tested
@@ -67,6 +70,7 @@ This guide provides step-by-step instructions for deploying TaskChain to the Ste
 - [ ] ESCROW_ACCOUNT_ID set to platform escrow address
 - [ ] No testnet configuration in environment
 - [ ] Secrets stored in secure location (not in code)
+- [ ] Network config (`config/networks/mainnet.env`) is separate from Testnet and contains no testnet values
 
 ### 5. Key Management
 - [ ] Platform escrow private key stored in HSM/KMS
@@ -93,6 +97,7 @@ This guide provides step-by-step instructions for deploying TaskChain to the Ste
 ### 8. Testing
 - [ ] All unit tests passing
 - [ ] All integration tests passing
+- [ ] CI contract test suite and build verification passing for the pinned toolchain
 - [ ] Load testing completed
 - [ ] Security testing completed
 - [ ] User acceptance testing completed
