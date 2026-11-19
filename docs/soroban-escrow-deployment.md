@@ -39,6 +39,17 @@ soroban contract invoke --id <CONTRACT_ID> --fn release --args <MILESTONE_ID> <C
 soroban contract invoke --id <CONTRACT_ID> --fn refund --args <MILESTONE_ID> <CALLER_ADDRESS> --source <FREELANCER_SECRET>
 ```
 
+Token allowlisting and asset validation
+- The escrow contract only accepts token contract addresses that are present in the admin-maintained allowlist. `initialize(...)` and `fund()` reject any token that is not allowlisted, malformed, or has invalid metadata (including decimals).
+- Only the configured admin (or governance-controlled account) may add or remove allowlisted tokens. Unauthorized attempts are rejected.
+- Each allowlist change emits an audit record containing the timestamp and the acting account.
+- Changes to the allowlist do not alter existing escrows unless platform policy explicitly requires it.
+
+Network-specific asset configurations
+- Document the allowlisted token contract address for each supported network (for example Testnet and Mainnet) in your deployment configuration before going live.
+- Keep the backend allowlist in sync with the on-chain allowlist so application and contract validation rules remain consistent.
+- Token decimals and amount calculations use checked arithmetic to avoid precision loss or overflow.
+
 Notes on contract functions and mapping
 - `initialize(...)` — creates an escrow (maps to requested `create_escrow`).
 - `fund()` — lock funds into the contract (maps to `fund_escrow`).

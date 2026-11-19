@@ -12,6 +12,9 @@ export const contractAuditActions = [
   'dispute_creation',
   'dispute_resolution',
   'contract_completion',
+  'token_allowlist_add',
+  'token_allowlist_remove',
+  'token_allowlist_update',
 ] as const
 export type ContractAuditAction = (typeof contractAuditActions)[number]
 
