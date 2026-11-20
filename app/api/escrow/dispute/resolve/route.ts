@@ -1,7 +1,9 @@
 /**
  * POST /api/escrow/dispute/resolve
  *
- * Resolve an open dispute. Admin only.
+ * Resolve an open dispute. Restricted to authorized arbitrators or
+ * governance-approved entities. Clients and freelancers cannot resolve
+ * disputes on their own contracts.
  *
  * Body:
  *   disputeId                string (UUID)
@@ -9,6 +11,12 @@
  *   resolutionNotes          string
  *   clientRefundAmount?      string  — required when outcome = 'resolved_split'
  *   freelancerPayoutAmount?  string  — required when outcome = 'resolved_split'
+ *
+ * Authorization:
+ *   The caller must be an admin (withAdmin) AND be present in the arbitrator
+ *   allowlist (ESCROW_ARBITRATOR_IDS, comma-separated) OR hold the governance
+ *   role (ESCROW_GOVERNANCE_IDS, comma-separated). Parties to the dispute
+ *   (client or freelancer of the underlying contract) are rejected.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -29,8 +37,33 @@ const VALID_OUTCOMES = [
 
 type Outcome = (typeof VALID_OUTCOMES)[number]
 
+function parseIdList(envValue: string | undefined): Set<string> {
+  return new Set(
+    (envValue ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+  )
+}
+
+function isAuthorizedResolver(userId: string): boolean {
+  const arbitrators = parseIdList(process.env.ESCROW_ARBITRATOR_IDS)
+  const governance = parseIdList(process.env.ESCROW_GOVERNANCE_IDS)
+  return arbitrators.has(userId) || governance.has(userId)
+}
+
 export async function POST(request: NextRequest) {
   return withAdmin(async (req: NextRequest, auth: AdminContext) => {
+    if (!isAuthorizedResolver(auth.userId)) {
+      return Response.json(
+        {
+          error: 'Caller is not an authorized arbitrator or governance entity',
+          code: 'UNAUTHORIZED_ARBITRATOR',
+        },
+        { status: 403 }
+      )
+    }
+
     let body: Record<string, unknown>
     try {
       body = await req.json()
@@ -68,6 +101,7 @@ export async function POST(request: NextRequest) {
         resolvedAt: result.dispute.resolvedAt,
         clientRefundAmount: result.dispute.clientRefundAmount,
         freelancerPayoutAmount: result.dispute.freelancerPayoutAmount,
+        resolverUserId: auth.userId,
         contractId: result.contract.id,
         contractStatus: result.contract.status,
         escrowStatus: result.contract.escrowStatus,

@@ -7,6 +7,8 @@ import { activityService } from '@/lib/activity'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
+const VALID_RESOLUTION_STATES = ['resolved', 'fully_released', 'refunded'] as const
+
 export const POST = withRbac('dispute:resolve', async (request: NextRequest, auth: RbacContext, context: RouteContext) => {
   const { id } = await context.params
   try {
@@ -24,41 +26,62 @@ export const POST = withRbac('dispute:resolve', async (request: NextRequest, aut
         ? body.newState.trim()
         : 'resolved'
 
-    const [dispute] = await sql`
-      SELECT d.*, j.escrow_contract_id
-      FROM disputes d
-      JOIN jobs j ON d.job_id = j.id
-      WHERE d.id = ${id}
-    `
-    if (!dispute) {
+    if (!(VALID_RESOLUTION_STATES as readonly string[]).includes(newState)) {
       return NextResponse.json(
-        { error: 'Dispute not found', code: 'DISPUTE_NOT_FOUND' },
-        { status: 404 }
+        { error: `newState must be one of: ${VALID_RESOLUTION_STATES.join(', ')}`, code: 'INVALID_STATE' },
+        { status: 400 }
       )
     }
 
-    if (dispute.status === 'resolved') {
+    // Atomic: lock the dispute row, verify it is active, and apply both updates
+    // in a single transaction so resolution can never be partially applied and
+    // concurrent/duplicate resolution attempts are serialized.
+    const result = await sql.begin(async (tx) => {
+      const [dispute] = await tx`
+        SELECT d.*, j.escrow_contract_id
+        FROM disputes d
+        JOIN jobs j ON d.job_id = j.id
+        WHERE d.id = ${id}
+        FOR UPDATE OF d
+      `
+      if (!dispute) {
+        return { error: 'Dispute not found', code: 'DISPUTE_NOT_FOUND', status: 404 as const }
+      }
+
+      if (dispute.status === 'resolved') {
+        return { error: 'Dispute is already resolved', code: 'ALREADY_RESOLVED', status: 409 as const }
+      }
+
+      if (dispute.status !== 'open' && dispute.status !== 'active') {
+        return { error: 'Dispute is not active', code: 'DISPUTE_NOT_ACTIVE', status: 409 as const }
+      }
+
+      const [updated] = await tx`
+        UPDATE disputes
+        SET status = 'resolved',
+            resolution = ${resolution},
+            resolved_by = ${auth.userId},
+            resolved_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ${id}
+        RETURNING *
+      `
+
+      await tx`
+        UPDATE jobs
+        SET escrow_status = ${newState}, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ${dispute.job_id}
+      `
+
+      return { dispute: updated, jobId: dispute.job_id as string }
+    })
+
+    if ('error' in result) {
       return NextResponse.json(
-        { error: 'Dispute is already resolved', code: 'ALREADY_RESOLVED' },
-        { status: 409 }
+        { error: result.error, code: result.code },
+        { status: result.status }
       )
     }
-
-    const [updated] = await sql`
-      UPDATE disputes
-      SET status = 'resolved',
-          resolution = ${resolution},
-          resolved_at = CURRENT_TIMESTAMP,
-          updated_at = CURRENT_TIMESTAMP
-      WHERE id = ${id}
-      RETURNING *
-    `
-
-    await sql`
-      UPDATE jobs
-      SET escrow_status = ${newState}, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ${dispute.job_id}
-    `
 
     activityService
       .log({
@@ -66,7 +89,7 @@ export const POST = withRbac('dispute:resolve', async (request: NextRequest, aut
         disputeId: id,
         actionType: 'dispute_resolved',
         description: `Dispute resolved: ${resolution}`,
-        metadata: { newState, resolution },
+        metadata: { newState, resolution, resolverId: auth.userId },
       })
       .catch((err: unknown) => console.error('[activity] Failed to log dispute_resolved:', err))
 
@@ -75,7 +98,7 @@ export const POST = withRbac('dispute:resolve', async (request: NextRequest, aut
         message: 'Dispute resolved',
         disputeId: id,
         resolution,
-        dispute: updated,
+        dispute: result.dispute,
       },
       { status: 200 }
     )
