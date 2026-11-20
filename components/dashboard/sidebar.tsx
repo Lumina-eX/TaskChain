@@ -14,6 +14,7 @@ import {
   MessageSquare,
   Banknote,
   ShieldCheck,
+  FolderOpen,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -33,6 +34,11 @@ const navItems = [
     label: 'Projects',
     href: '/dashboard/projects',
     icon: FileText,
+  },
+  {
+    label: 'Workspace',
+    href: '/dashboard/contracts',
+    icon: FolderOpen,
   },
   {
     label: 'Disputes',
