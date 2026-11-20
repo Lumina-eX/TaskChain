@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Loader2, AlertCircle, Star, ShieldCheck, Wallet, User } from "lucide-react";
+import { ArrowLeft, Loader2, AlertCircle, Star, ShieldCheck, Wallet, User, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -175,6 +175,12 @@ export default function ContractDetailPage() {
           <Badge className={`${statusCfg.color} ${statusCfg.textColor} border-0`}>
             {statusCfg.label}
           </Badge>
+          <Link href={`/dashboard/contracts/${contract.id}/workspace`}>
+            <Button variant="outline" size="sm" className="gap-2">
+              <FolderOpen className="h-4 w-4" />
+              Workspace
+            </Button>
+          </Link>
         </div>
 
         {/* Parties */}
