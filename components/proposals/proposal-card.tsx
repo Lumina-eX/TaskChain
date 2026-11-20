@@ -8,17 +8,21 @@ import type { Proposal } from "@/lib/proposals/types";
 interface Props {
   proposal: Proposal;
   readOnly?: boolean;
+  isShortlisted?: boolean;
   onAccept?: (p: Proposal) => void;
   onReject?: (p: Proposal) => void;
   onViewProfile?: (p: Proposal) => void;
+  onToggleShortlist?: (p: Proposal) => void;
 }
 
 export function ProposalCard({
   proposal,
   readOnly,
+  isShortlisted,
   onAccept,
   onReject,
   onViewProfile,
+  onToggleShortlist,
 }: Props) {
   const ISO = /^[A-Z]{3}$/;
   const code = (proposal.currency || "").toUpperCase();
@@ -33,6 +37,10 @@ export function ProposalCard({
     .join("")
     .toUpperCase();
 
+  const canDecide = !readOnly && proposal.status === "pending";
+  const canShortlist =
+    !readOnly && onToggleShortlist && (proposal.status === "pending" || proposal.status === "shortlisted");
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-4">
@@ -44,7 +52,7 @@ export function ProposalCard({
             <p className="font-medium">{proposal.freelancerName}</p>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <span>{proposal.freelancerRating.toFixed(1)} / 5</span>
-              <span>Â·</span>
+              <span>·</span>
               <span>{proposal.freelancerPastContracts} jobs</span>
             </div>
           </div>
@@ -64,7 +72,7 @@ export function ProposalCard({
         <p className="line-clamp-2 text-sm text-muted-foreground">
           {proposal.coverLetter}
         </p>
-        <div className="grid grid-cols-2 gap-2 text-sm">
+        <div className="grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
           <div>
             <span className="text-muted-foreground">Budget: </span>
             <span className="font-medium">{budget}</span>
@@ -82,7 +90,17 @@ export function ProposalCard({
           >
             View profile
           </Button>
-          {!readOnly && proposal.status === "pending" && (
+          {canShortlist && (
+            <Button
+              variant="outline"
+              size="sm"
+              aria-pressed={!!isShortlisted}
+              onClick={() => onToggleShortlist?.(proposal)}
+            >
+              {isShortlisted ? "Remove from shortlist" : "Shortlist"}
+            </Button>
+          )}
+          {canDecide && (
             <>
               <Button size="sm" onClick={() => onAccept?.(proposal)}>
                 Accept

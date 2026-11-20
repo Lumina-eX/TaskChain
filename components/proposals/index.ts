@@ -5,3 +5,6 @@ export * from "./proposal-status-badge";
 export * from "./proposal-confirm-dialog";
 export * from "./proposal-skeleton";
 export * from "./proposal-empty-state";
+export * from "./proposal-comparison";
+export * from "./proposal-comparison-table";
+export * from "./proposal-shortlist-toggle";
