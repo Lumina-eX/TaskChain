@@ -8,7 +8,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { ProposalFilters as Filters } from "@/lib/proposals/types";
+import type { ProposalStatus } from "@/lib/proposals";
+
+type Filters = {
+  status: ProposalStatus | "all";
+  sortBy: "budget" | "delivery" | "rating" | "recent";
+  sortDir: "asc" | "desc";
+  search: string;
+};
 
 interface Props {
   value: Filters;
@@ -26,14 +33,15 @@ export function ProposalFiltersBar({ value, onChange }: Props) {
       />
       <Select
         value={value.status ?? "all"}
-        onValueChange={(v) => onChange({ ...value, status: v as any })}
+        onValueChange={(v) => onChange({ ...value, status: v as ProposalStatus | "all" })}
       >
         <SelectTrigger className="md:w-40">
           <SelectValue placeholder="Status" />
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">All</SelectItem>
-          <SelectItem value="pending">Pending</SelectItem>
+          <SelectItem value="submitted">Submitted</SelectItem>
+          <SelectItem value="under_review">Shortlisted</SelectItem>
           <SelectItem value="accepted">Accepted</SelectItem>
           <SelectItem value="rejected">Rejected</SelectItem>
           <SelectItem value="updated">Updated</SelectItem>
@@ -41,7 +49,7 @@ export function ProposalFiltersBar({ value, onChange }: Props) {
       </Select>
       <Select
         value={value.sortBy ?? "recent"}
-        onValueChange={(v) => onChange({ ...value, sortBy: v as any })}
+        onValueChange={(v) => onChange({ ...value, sortBy: v as Filters["sortBy"] })}
       >
         <SelectTrigger className="md:w-44">
           <SelectValue placeholder="Sort by" />
