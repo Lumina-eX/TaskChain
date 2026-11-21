@@ -3,11 +3,13 @@ import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const escrowStages = [
+  "Unfunded",
   "Funded",
   "In Progress",
   "Submitted",
   "Approved",
   "Released",
+  "Refunded",
 ] as const;
 
 export type EscrowStage = (typeof escrowStages)[number];
