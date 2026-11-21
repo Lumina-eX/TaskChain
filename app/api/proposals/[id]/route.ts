@@ -126,6 +126,9 @@ export const PATCH = withProposalAuth<RouteContext>(
       return ok(updated);
     } catch (err) {
       console.error(`[PATCH /api/proposals/${proposalId}]`, err);
+      if ((err as { code?: string })?.code === "23505") {
+        return failOne(409, "PROJECT_ALREADY_HAS_ACCEPTED_PROPOSAL", "This project already has an accepted proposal");
+      }
       return failOne(500, "PROPOSAL_UPDATE_FAILED", "Failed to update proposal");
     }
   },
