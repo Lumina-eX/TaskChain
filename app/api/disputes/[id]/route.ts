@@ -3,6 +3,8 @@ export const dynamic = 'force-dynamic'
 import { NextRequest, NextResponse } from 'next/server'
 import { sql } from '@/lib/db'
 import { withAuthCtx } from '@/lib/auth/middleware'
+import { disputeWorkflowService, isUuid } from '@/lib/disputes'
+import { disputeErrorResponse } from '@/lib/disputes/http'
 
 type RouteContext = { params: Promise<{ id: string }> }
 type UserRow = { id: string | number; role: string }
@@ -12,8 +14,28 @@ type DisputeRow = {
   [key: string]: unknown
 }
 
-export const GET = withAuthCtx(async (_request: NextRequest, auth, context: RouteContext) => {
+/**
+ * GET /api/disputes/:id
+ *
+ * Contract-scoped disputes (UUID ids) are served by the dispute workflow,
+ * which enforces participant/arbitrator authorization and only exposes
+ * evidence and audit history to authorized actors.
+ *
+ * Job-scoped legacy disputes (integer ids) keep the original behaviour so the
+ * existing dashboard continues to work.
+ */
+export const GET = withAuthCtx(async (request: NextRequest, auth, context: RouteContext) => {
   const { id } = await context.params
+
+  if (isUuid(id)) {
+    try {
+      const result = await disputeWorkflowService.getDispute(id, auth.walletAddress)
+      return NextResponse.json(result, { status: 200 })
+    } catch (error) {
+      return disputeErrorResponse(error)
+    }
+  }
+
   try {
     const users = (await sql`
       SELECT id, role FROM users WHERE wallet_address = ${auth.walletAddress} LIMIT 1

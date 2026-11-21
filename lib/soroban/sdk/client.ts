@@ -11,7 +11,14 @@ import {
   xdr,
   type Transaction,
 } from '@stellar/stellar-sdk'
-import { assertMilestoneId, assertSafeAmount, encodeAddress, encodeMilestones, encodeU32 } from './args'
+import {
+  assertMilestoneId,
+  assertSafeAmount,
+  encodeAddress,
+  encodeBool,
+  encodeMilestones,
+  encodeU32,
+} from './args'
 import { parseContractError, parseContractEvents, parseDiagnosticEvents } from './parse'
 import {
   SorobanSdkError,
@@ -117,6 +124,37 @@ export class SorobanContractClient {
       encodeU32(assertMilestoneId(milestoneId)),
       encodeAddress(this.sourcePublicKey),
     ])
+  }
+
+  /**
+   * Arbiter-only: settle a disputed milestone on-chain.
+   * `release_to_freelancer === true` pays the freelancer, otherwise the client
+   * is refunded (the escrow contract is binary — no split outcome).
+   */
+  async resolveDispute(
+    escrowId: string,
+    milestoneId: string,
+    releaseToFreelancer: boolean
+  ): Promise<TxResult> {
+    assertContractId(escrowId, 'escrowId')
+    return this.invoke(escrowId, 'resolve_dispute', [
+      encodeU32(assertMilestoneId(milestoneId)),
+      encodeBool(releaseToFreelancer),
+    ])
+  }
+
+  /** Re-fetch a submitted transaction to confirm its final on-chain status. */
+  async getTransactionStatus(
+    hash: string
+  ): Promise<'confirmed' | 'failed' | 'pending' | 'unknown'> {
+    try {
+      const response = await this.server.getTransaction(hash)
+      if (response.status === 'SUCCESS') return 'confirmed'
+      if (response.status === 'FAILED') return 'failed'
+      return 'pending'
+    } catch {
+      return 'unknown'
+    }
   }
 
   async releasePayment(escrowId: string, milestoneId: string): Promise<TxResult> {
