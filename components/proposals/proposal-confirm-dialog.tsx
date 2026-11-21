@@ -15,6 +15,8 @@ interface Props {
   open: boolean;
   action: "accept" | "reject" | null;
   freelancerName?: string;
+  isSubmitting?: boolean;
+  error?: string | null;
   onCancel: () => void;
   onConfirm: () => void;
 }
@@ -23,12 +25,21 @@ export function ProposalConfirmDialog({
   open,
   action,
   freelancerName,
+  isSubmitting = false,
+  error = null,
   onCancel,
   onConfirm,
 }: Props) {
   const isAccept = action === "accept";
+  const name = freelancerName ?? "this freelancer";
+
   return (
-    <AlertDialog open={open} onOpenChange={(o) => !o && onCancel()}>
+    <AlertDialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o && !isSubmitting) onCancel();
+      }}
+    >
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
@@ -36,14 +47,34 @@ export function ProposalConfirmDialog({
           </AlertDialogTitle>
           <AlertDialogDescription>
             {isAccept
-              ? `Accepting ${freelancerName ?? "this freelancer"}'s proposal will notify them and start the project.`
-              : `Rejecting ${freelancerName ?? "this freelancer"}'s proposal will notify them.`}
+              ? `Accepting ${name}'s proposal will notify them and start the project.`
+              : `Rejecting ${name}'s proposal will notify them.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
         <AlertDialogFooter>
-          <AlertDialogCancel onClick={onCancel}>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm}>
-            {isAccept ? "Accept" : "Reject"}
+          <AlertDialogCancel onClick={onCancel} disabled={isSubmitting}>
+            Cancel
+          </AlertDialogCancel>
+          <AlertDialogAction
+            onClick={(e) => {
+              e.preventDefault();
+              onConfirm();
+            }}
+            disabled={isSubmitting}
+            aria-busy={isSubmitting}
+          >
+            {isSubmitting
+              ? isAccept
+                ? "Accepting..."
+                : "Rejecting..."
+              : isAccept
+                ? "Accept"
+                : "Reject"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
