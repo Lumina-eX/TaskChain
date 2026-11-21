@@ -22,3 +22,9 @@ export {
   type MilestoneProgressMetrics,
   type MilestoneStateTransition,
 } from '@/lib/milestone-tracker'
+
+export {
+  ContractMilestoneCalendar,
+  type CalendarMilestone,
+  type MilestoneStatus,
+} from './contract-milestone-calendar'
