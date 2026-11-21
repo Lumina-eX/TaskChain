@@ -11,6 +11,9 @@
  *   contractId    string (UUID)
  *   fundingTxHash string  — on-chain transaction hash
  *   amount        string  — amount funded, e.g. "500.00"
+ *   assetContractId string (optional) — Soroban token contract address the
+ *                  funding was denominated in. When provided it MUST be on
+ *                  the active network's token allowlist.
  */
 
 import { NextRequest, NextResponse } from 'next/server'
@@ -18,6 +21,7 @@ import { withRbac, RbacContext } from '@/lib/auth/rbacMiddleware'
 import { withIdempotency } from '@/lib/idempotency'
 import { escrowService, EscrowError, escrowErrorToHttpStatus } from '@/lib/escrow'
 import { dispatchNotification } from '@/lib/notifications'
+import { assertAssetAllowedForEscrow, TokenAllowlistError } from '@/lib/tokenAllowlist'
 
 export const POST = withRbac('escrow:fund', withIdempotency('escrow_fund', async (
   _request: NextRequest,
@@ -25,6 +29,17 @@ export const POST = withRbac('escrow:fund', withIdempotency('escrow_fund', async
   body: Record<string, unknown>
 ) => {
   try {
+    // Validate the asset contract address against the allowlist before any
+    // state is touched. Rejects malformed, unsupported, or mismatched assets.
+    const assetContractId = body.assetContractId
+    if (assetContractId !== undefined) {
+      await assertAssetAllowedForEscrow({
+        assetContractId: assetContractId as string,
+        contractId: body.contractId as string,
+        amount: body.amount as string,
+      })
+    }
+
     const result = await escrowService.fundEscrow({
       contractId: body.contractId as string,
       callerWalletAddress: auth.walletAddress,
@@ -55,6 +70,12 @@ export const POST = withRbac('escrow:fund', withIdempotency('escrow_fund', async
       fundingTxHash: result.contract.fundingTxHash,
     })
   } catch (err) {
+    if (err instanceof TokenAllowlistError) {
+      return NextResponse.json(
+        { error: err.message, code: err.code },
+        { status: err.httpStatus }
+      )
+    }
     if (err instanceof EscrowError) {
       return NextResponse.json(
         { error: err.message, code: err.code },

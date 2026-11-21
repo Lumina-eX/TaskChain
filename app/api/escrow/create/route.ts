@@ -10,12 +10,19 @@
  *   same key returns the original response instead of deploying a second
  *   contract.
  *
+ * Asset validation:
+ *   The `currency` (and optional `tokenContractAddress`) must reference an
+ *   allowlisted Stellar token for the active network. Unsupported, malformed,
+ *   or mismatched assets are rejected with HTTP 422 before any contract is
+ *   deployed.
+ *
  * Body:
  *   projectId            string (UUID)
  *   freelancerId         string (UUID)
  *   freelancerWalletAddress string
  *   totalAmount          string  e.g. "500.00"
  *   currency             string  e.g. "USDC"
+ *   tokenContractAddress? string (Soroban C... contract address)
  *   terms?               string
  *   milestones?          Array<{ title, amount, description?, dueDate? }>
  */
@@ -30,6 +37,7 @@ import {
   escrowErrorToHttpStatus,
   EscrowAlreadyExistsError,
 } from '@/lib/escrow'
+import { assetAllowlist, AssetValidationError } from '@/lib/escrow/asset-allowlist'
 
 export const POST = withAuth(withIdempotency('escrow_create', async (
   _request: NextRequest,
@@ -48,6 +56,25 @@ export const POST = withAuth(withIdempotency('escrow_create', async (
   }
   const clientId = users[0].id as string
 
+  // --- Validate asset against the network allowlist before any deployment ---
+  const currency = (body.currency as string) ?? 'USDC'
+  const tokenContractAddress = body.tokenContractAddress as string | undefined
+  try {
+    await assetAllowlist.assertFundable({
+      currency,
+      tokenContractAddress,
+      amount: body.totalAmount as string,
+    })
+  } catch (err) {
+    if (err instanceof AssetValidationError) {
+      return NextResponse.json(
+        { error: err.message, code: err.code },
+        { status: 422 }
+      )
+    }
+    throw err
+  }
+
   try {
     const result = await escrowService.createEscrow({
       projectId: body.projectId as string,
@@ -56,7 +83,7 @@ export const POST = withAuth(withIdempotency('escrow_create', async (
       clientWalletAddress: auth.walletAddress,
       freelancerWalletAddress: body.freelancerWalletAddress as string,
       totalAmount: body.totalAmount as string,
-      currency: (body.currency as string) ?? 'USDC',
+      currency,
       terms: body.terms as string | undefined,
       milestones: body.milestones as Array<{
         title: string

@@ -13,7 +13,11 @@ type AdminHandler = (
 /**
  * Middleware that restricts access to admin users only.
  * This is a convenience wrapper around withRole(['admin']).
- * 
+ *
+ * Admin-only operations such as token allowlist management (escrow asset
+ * validation) must be routed through this middleware or withRole(['admin'])
+ * so that unauthorized callers are rejected before reaching the handler.
+ *
  * @deprecated Use withRole(['admin']) or withRbac with specific admin permissions instead.
  * This is maintained for backward compatibility.
  */
