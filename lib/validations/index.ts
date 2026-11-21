@@ -192,6 +192,51 @@ export const DeliverableMetadataSchema = z.object({
 
 export type DeliverableMetadata = z.infer<typeof DeliverableMetadataSchema>
 
+// ─── Contract Files ────────────────────────────────────────────────────────────
+
+export const ALLOWED_CONTRACT_FILE_MIME_TYPES = [
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/svg+xml',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'application/zip',
+  'application/x-zip-compressed',
+  'application/gzip',
+  'application/x-tar',
+  'text/plain',
+  'text/csv',
+  'text/markdown',
+  'application/json',
+] as const
+
+export const MAX_CONTRACT_FILE_SIZE = 50 * 1024 * 1024 // 50 MB
+export const MAX_CONTRACT_FILES_PER_BATCH = 10
+
+export const UploadContractFileSchema = z.object({
+  contract_id: z.number().int().positive('contract_id must be a positive integer'),
+  milestone_id: z.number().int().positive('milestone_id must be a positive integer').optional(),
+  description: z.string().max(1000, 'description must be 1000 characters or fewer').optional(),
+  tags: z.array(z.string().trim().min(1).max(50)).max(20, 'Maximum 20 tags allowed').optional(),
+})
+
+export const ListContractFilesSchema = z.object({
+  milestone_id: z.number().int().positive().optional(),
+  include_deleted: z.boolean().optional().default(false),
+  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+  offset: z.coerce.number().int().min(0).optional().default(0),
+})
+
+export type UploadContractFileInput = z.infer<typeof UploadContractFileSchema>
+export type ListContractFilesInput = z.infer<typeof ListContractFilesSchema>
+
 export type CreateMilestoneInput = z.infer<typeof CreateMilestoneSchema>
 export type UpdateMilestoneInput = z.infer<typeof UpdateMilestoneSchema>
 export type CreateProjectInput = z.infer<typeof CreateProjectSchema>

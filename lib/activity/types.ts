@@ -12,6 +12,10 @@ export const activityActionTypes = [
   'dispute_resolved',
   'contract_completed',
   'contract_cancelled',
+  'file_uploaded',
+  'file_downloaded',
+  'file_deleted',
+  'file_version_updated',
 ] as const
 
 export type ActivityActionType = (typeof activityActionTypes)[number]
