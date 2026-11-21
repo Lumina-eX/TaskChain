@@ -26,6 +26,38 @@ interface DeployContractBody {
   milestones?: unknown
 }
 
+/**
+ * Deployment environment guard.
+ *
+ * Testnet and Mainnet are configured independently via environment variables.
+ * The network passphrase and deployment network are validated against the
+ * configured environment before any on-chain action is taken, which prevents
+ * accidental deployment to the wrong network.
+ */
+const STELLAR_NETWORK = process.env.STELLAR_NETWORK ?? ''
+const EXPECTED_NETWORK_PASSPHRASE = process.env.STELLAR_NETWORK_PASSPHRASE ?? ''
+const MAINNET_DEPLOY_APPROVED = process.env.SOROBAN_MAINNET_DEPLOY_APPROVED === 'true'
+
+function validateDeploymentEnvironment(): string | null {
+  if (STELLAR_NETWORK !== 'testnet' && STELLAR_NETWORK !== 'mainnet') {
+    return 'STELLAR_NETWORK must be set to "testnet" or "mainnet"'
+  }
+  if (!EXPECTED_NETWORK_PASSPHRASE) {
+    return 'STELLAR_NETWORK_PASSPHRASE is required for deployment'
+  }
+  const expected =
+    STELLAR_NETWORK === 'testnet'
+      ? 'Test SDF Network ; September 2015'
+      : 'Public Global Stellar Network ; September 2015'
+  if (EXPECTED_NETWORK_PASSPHRASE !== expected) {
+    return `STELLAR_NETWORK_PASSPHRASE does not match network "${STELLAR_NETWORK}"`
+  }
+  if (STELLAR_NETWORK === 'mainnet' && !MAINNET_DEPLOY_APPROVED) {
+    return 'Mainnet deployment requires manual approval: set SOROBAN_MAINNET_DEPLOY_APPROVED=true after review'
+  }
+  return null
+}
+
 function isPositiveInt(v: unknown): v is number {
   return typeof v === 'number' && Number.isInteger(v) && v > 0
 }
@@ -55,6 +87,14 @@ function parseMilestones(raw: unknown): MilestoneInput[] | string {
 }
 
 export const POST = withAuth(async (request: NextRequest, auth) => {
+  const envError = validateDeploymentEnvironment()
+  if (envError) {
+    return NextResponse.json(
+      { error: envError, code: 'DEPLOYMENT_CONFIG_INVALID' },
+      { status: 503 }
+    )
+  }
+
   let body: DeployContractBody
   try {
     body = await request.json()
@@ -145,6 +185,16 @@ export const POST = withAuth(async (request: NextRequest, auth) => {
     return NextResponse.json({ error: message, code: 'DEPLOYMENT_FAILED' }, { status: 500 })
   }
 
+  if (!deployment.contractAddress || !deployment.txHash) {
+    return NextResponse.json(
+      {
+        error: 'Deployment did not return a contract address and transaction hash; no record was written',
+        code: 'DEPLOYMENT_INCOMPLETE',
+      },
+      { status: 500 }
+    )
+  }
+
   let contract
   try {
     contract = await createContract({
@@ -164,7 +214,15 @@ export const POST = withAuth(async (request: NextRequest, auth) => {
     }
   } catch (err) {
     console.error('[contracts/deploy] DB persistence error:', err)
-    return NextResponse.json({ error: 'Failed to persist contract data', code: 'DB_ERROR' }, { status: 500 })
+    return NextResponse.json(
+      {
+        error: 'Failed to persist contract data; on-chain deployment txHash ' + deployment.txHash + ' must be reconciled manually',
+        code: 'DB_ERROR',
+        txHash: deployment.txHash,
+        contractAddress: deployment.contractAddress,
+      },
+      { status: 500 }
+    )
   }
 
   const users = await sql`SELECT id FROM users WHERE wallet_address = ${auth.walletAddress} LIMIT 1`
@@ -181,6 +239,8 @@ export const POST = withAuth(async (request: NextRequest, auth) => {
         currency,
         milestonesCount: milestones.length,
         freelancerId: body.freelancerId,
+        network: STELLAR_NETWORK,
+        txHash: deployment.txHash,
       },
     }).catch((err: unknown) => console.error('[activity] Failed to log contract_created:', err))
 
@@ -192,7 +252,15 @@ export const POST = withAuth(async (request: NextRequest, auth) => {
       actorUserId: Number(actorId),
       actorWallet: auth.walletAddress,
       newState: 'active',
-      metadata: { totalAmount: body.totalAmount, currency, milestonesCount: milestones.length },
+      metadata: {
+        totalAmount: body.totalAmount,
+        currency,
+        milestonesCount: milestones.length,
+        network: STELLAR_NETWORK,
+        networkPassphrase: deployment.networkPassphrase,
+        contractAddress: deployment.contractAddress,
+        txHash: deployment.txHash,
+      },
     }, auth.walletAddress).catch((err: unknown) => console.error('[audit-log] Failed to log contract_creation:', err))
   }
 
@@ -203,6 +271,7 @@ export const POST = withAuth(async (request: NextRequest, auth) => {
       contractAddress: contract.contract_address,
       txHash: contract.contract_tx_hash,
       networkPassphrase: contract.network_passphrase,
+      network: STELLAR_NETWORK,
       status: contract.status,
       totalAmount: contract.total_amount,
       currency: contract.currency,

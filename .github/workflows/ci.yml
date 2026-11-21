@@ -53,3 +53,54 @@ jobs:
       - name: Run Soroban Contract Tests
         working-directory: contracts
         run: cargo test --workspace
+
+      - name: Install Pinned Rust Toolchain
+        uses: dtolnay/rust-toolchain@1.84.0
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Build Escrow Contract (Deterministic)
+        working-directory: contracts
+        env:
+          RUSTFLAGS: "-C strip=symbols"
+          SOURCE_DATE_EPOCH: "0"
+        run: cargo build --release --target wasm32-unknown-unknown --locked
+
+      - name: Compute WASM Artifact Hash
+        id: wasm_hash
+        run: |
+          WASM_PATH=$(find contracts/target/wasm32-unknown-unknown/release -name "*.wasm" | head -n 1)
+          if [ -z "$WASM_PATH" ]; then
+            echo "::error::WASM artifact not generated; refusing to continue."
+            exit 1
+          fi
+          HASH=$(sha256sum "$WASM_PATH" | awk '{print $1}')
+          echo "wasm_path=$WASM_PATH" >> "$GITHUB_OUTPUT"
+          echo "wasm_sha256=$HASH" >> "$GITHUB_OUTPUT"
+          echo "WASM: $WASM_PATH"
+          echo "SHA256: $HASH"
+
+      - name: Write Build Metadata
+        env:
+          WASM_PATH: ${{ steps.wasm_hash.outputs.wasm_path }}
+          WASM_SHA256: ${{ steps.wasm_hash.outputs.wasm_sha256 }}
+        run: |
+          mkdir -p deployment-records
+          {
+            echo "git_commit=${GITHUB_SHA}"
+            echo "git_ref=${GITHUB_REF}"
+            echo "rust_toolchain=1.84.0"
+            echo "wasm_path=${WASM_PATH}"
+            echo "wasm_sha256=${WASM_SHA256}"
+            echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > deployment-records/build-metadata.env
+          cat deployment-records/build-metadata.env
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: escrow-wasm-${{ github.sha }}
+          path: |
+            ${{ steps.wasm_hash.outputs.wasm_path }}
+            deployment-records/build-metadata.env
+          retention-days: 365

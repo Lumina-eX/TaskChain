@@ -288,6 +288,42 @@ fn mark_milestone_expired(
     Ok(())
 }
 
+/// Deployment verification metadata for reproducible, auditable Soroban deployments.
+/// Records are immutable once written; redeployments append new records.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub struct DeploymentRecord {
+    pub network: String,
+    pub contract_id: Address,
+    pub wasm_hash: String,
+    pub deployment_tx_hash: String,
+    pub deployment_timestamp: u64,
+    pub git_commit_hash: String,
+    pub source_version: String,
+    pub rust_toolchain_version: String,
+    pub soroban_sdk_version: String,
+    pub deployer: Address,
+}
+
+/// Validates that an initialization configuration is well-formed before deployment.
+/// Returns `Error::InvalidDeadline` for malformed deadlines and `Error::ZeroAmount`
+/// for non-positive milestone amounts, mirroring on-chain initialization rules.
+pub fn validate_init_params(env: &Env, milestones: &Vec<Milestone>) -> Result<(), Error> {
+    if milestones.is_empty() {
+        return Err(Error::MilestoneNotFound);
+    }
+    for i in 0..milestones.len() {
+        let milestone = milestones.get(i).unwrap();
+        if milestone.amount <= 0 {
+            return Err(Error::ZeroAmount);
+        }
+        if milestone.deadline == 0 || milestone.deadline <= env.ledger().timestamp() {
+            return Err(Error::InvalidDeadline);
+        }
+    }
+    Ok(())
+}
+
 #[contract]
 pub struct EscrowContract;
 
