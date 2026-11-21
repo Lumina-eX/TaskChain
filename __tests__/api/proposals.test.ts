@@ -274,6 +274,61 @@ describe("PATCH /api/proposals/[id]", () => {
     const res = await updateProposal(jsonRequest(proposalUrl, "PATCH", { status: "accepted" }), ctx(PROPOSAL_ID));
     expect(res.status).toBe(200);
     expect((await res.json()).data.status).toBe("accepted");
+    const statusUpdate = (sql as unknown as SqlMock).mock.calls[2][0].join("");
+    expect(statusUpdate).toContain("project_proposal_audit_logs");
+    expect(statusUpdate).toContain("AND p.client_id =");
+  });
+
+  it("shortlists a proposal and records the action", async () => {
+    queueSql([[client], [proposalRow()], [proposalRow({ status: "under_review" })]]);
+    const res = await updateProposal(
+      jsonRequest(proposalUrl, "PATCH", { status: "under_review" }),
+      ctx(PROPOSAL_ID),
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.status).toBe("under_review");
+    const statusUpdate = (sql as unknown as SqlMock).mock.calls[2][0].join("");
+    expect(statusUpdate).toContain("'shortlist'");
+  });
+
+  it("returns success without another write for a repeated decision", async () => {
+    queueSql([[client], [proposalRow({ status: "accepted" })]]);
+    const res = await updateProposal(
+      jsonRequest(proposalUrl, "PATCH", { status: "accepted" }),
+      ctx(PROPOSAL_ID),
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.status).toBe("accepted");
+    expect(sql).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats a concurrent identical decision as an idempotent success", async () => {
+    queueSql([
+      [client],
+      [proposalRow({ status: "under_review" })],
+      [],
+      [proposalRow({ status: "accepted" })],
+    ]);
+    const res = await updateProposal(
+      jsonRequest(proposalUrl, "PATCH", { status: "accepted" }),
+      ctx(PROPOSAL_ID),
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).data.status).toBe("accepted");
+    expect(sql).toHaveBeenCalledTimes(4);
+  });
+
+  it("returns a conflict when another proposal already won the project award", async () => {
+    queueSql([[client], [proposalRow({ status: "under_review" })]]);
+    (sql as unknown as SqlMock).mockRejectedValueOnce(
+      Object.assign(new Error("unique violation"), { code: "23505" }),
+    );
+    const res = await updateProposal(
+      jsonRequest(proposalUrl, "PATCH", { status: "accepted" }),
+      ctx(PROPOSAL_ID),
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).errors[0].code).toBe("PROJECT_ALREADY_AWARDED");
   });
 
   it("blocks invalid status transitions", async () => {

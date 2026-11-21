@@ -232,6 +232,10 @@ export interface Proposal {
   id: string;
   projectId: string;
   freelancerId: string;
+  freelancerName?: string;
+  freelancerSkills?: string[];
+  freelancerRating?: number;
+  freelancerPastContracts?: number;
   message: string;
   budget: number;
   deliveryTime: number;
@@ -255,6 +259,12 @@ export function rowToProposal(row: Record<string, unknown>): Proposal {
     id: String(row.id),
     projectId: String(row.project_id),
     freelancerId: String(row.freelancer_id),
+    freelancerName: row.freelancer_name ? String(row.freelancer_name) : undefined,
+    freelancerSkills: Array.isArray(row.freelancer_skills)
+      ? (row.freelancer_skills as string[])
+      : [],
+    freelancerRating: Number(row.freelancer_rating ?? 0),
+    freelancerPastContracts: Number(row.freelancer_completed ?? 0),
     message: row.message as string,
     budget: Number(row.budget),
     deliveryTime: Number(row.delivery_time),
@@ -405,8 +415,14 @@ export async function listProposals(opts: ListProposalsOptions): Promise<Proposa
   const freelancerFilter = freelancerId ?? null;
 
   const rows = (await sql`
-    SELECT pp.*, COUNT(*) OVER() AS total_count
+    SELECT pp.*,
+      u.username AS freelancer_name,
+      u.skills AS freelancer_skills,
+      u.avg_rating AS freelancer_rating,
+      u.completed_jobs AS freelancer_completed,
+      COUNT(*) OVER() AS total_count
     FROM project_proposals pp
+    JOIN users u ON u.id = pp.freelancer_id
     WHERE pp.project_id = ${projectId}
       AND (${statusFilter}::proposal_status IS NULL OR pp.status = ${statusFilter}::proposal_status)
       AND (${freelancerFilter}::uuid IS NULL OR pp.freelancer_id = ${freelancerFilter}::uuid)
@@ -464,18 +480,56 @@ export async function updateProposalContent(
 export async function updateProposalStatus(
   current: Proposal,
   next: ProposalStatus,
+  actorId: string,
 ): Promise<Proposal | null> {
   if (next === "accepted") return acceptProposal(current);
 
   const rows = (await sql`
-    UPDATE project_proposals
-    SET status = ${next}::proposal_status,
-        updated_at = NOW()
-    WHERE id = ${current.id}
-      AND status = ${current.status}::proposal_status
-    RETURNING *
+    WITH changed AS (
+      UPDATE project_proposals AS pp
+      SET status = ${next}::proposal_status,
+          updated_at = NOW()
+      FROM projects AS p
+      WHERE pp.id = ${current.id}
+        AND pp.project_id = p.id
+        AND p.client_id = ${actorId}
+        AND pp.status = ${current.status}::proposal_status
+      RETURNING pp.*
+    ), audited AS (
+      INSERT INTO project_proposal_audit_logs
+        (proposal_id, project_id, actor_id, action, previous_status, new_status)
+      SELECT id, project_id, ${actorId},
+        CASE ${next}::proposal_status
+          WHEN 'under_review' THEN 'shortlist'
+          WHEN 'accepted' THEN 'accept'
+          WHEN 'rejected' THEN 'reject'
+        END,
+        ${current.status}::proposal_status, ${next}::proposal_status
+      FROM changed
+      RETURNING proposal_id
+    )
+    SELECT changed.*
+    FROM changed
+    JOIN audited ON audited.proposal_id = changed.id
   `) as Array<Record<string, unknown>>;
-  if (!rows.length) return null;
+
+  if (!rows.length) {
+    // A concurrent identical request is a successful no-op; ownership is
+    // rechecked so a stale authorization read cannot authorize the retry.
+    const unchanged = (await sql`
+      SELECT pp.*
+      FROM project_proposals pp
+      JOIN projects p ON p.id = pp.project_id
+      WHERE pp.id = ${current.id}
+        AND pp.status = ${next}::proposal_status
+        AND p.client_id = ${actorId}
+      LIMIT 1
+    `) as Array<Record<string, unknown>>;
+    if (!unchanged.length) return null;
+    invalidateProjectProposals(current.projectId);
+    return rowToProposal(unchanged[0]);
+  }
+
   invalidateProjectProposals(current.projectId);
   return rowToProposal(rows[0]);
 }
