@@ -24,6 +24,11 @@ Contract methods that can fail return `Result<_, Error>`. Soroban exposes the en
 | Escrow | 14 | `ExtensionNotFound` | `ERR_EXTENSION_NOT_FOUND` |
 | Escrow | 15 | `DuplicateMilestoneId` | `ERR_DUPLICATE_MILESTONE_ID` |
 | Escrow | 16 | `InsufficientBalance` | `ERR_INSUFFICIENT_BALANCE` |
+| Escrow | 17 | `ArbitratorNotAuthorized` | `ERR_ARBITRATOR_NOT_AUTHORIZED` |
+| Escrow | 18 | `DisputeNotFound` | `ERR_DISPUTE_NOT_FOUND` |
+| Escrow | 19 | `DisputeNotActive` | `ERR_DISPUTE_NOT_ACTIVE` |
+| Escrow | 20 | `DisputeAlreadyResolved` | `ERR_DISPUTE_ALREADY_RESOLVED` |
+| Escrow | 21 | `InvalidResolutionOutcome` | `ERR_INVALID_RESOLUTION_OUTCOME` |
 | Dispute | 1 | `AlreadyInitialized` | `ERR_ALREADY_INITIALIZED` |
 | Dispute | 2 | `NotInitialized` | `ERR_NOT_INITIALIZED` |
 | Dispute | 3 | `DisputeNotFound` | `ERR_DISPUTE_NOT_FOUND` |
@@ -37,6 +42,17 @@ Contract methods that can fail return `Result<_, Error>`. Soroban exposes the en
 | Dispute | 11 | `DisputeNotResolved` | `ERR_DISPUTE_NOT_RESOLVED` |
 
 Numeric values are append-only ABI values. If a new failure is added, append a new variant and never renumber an existing one.
+
+### Arbitration authorization
+
+Arbitration actions on the escrow contract are restricted to an explicitly authorized arbitrator address set at escrow creation (`arbiter`) or an approved governance address registered by the escrow admin. Clients and freelancers cannot act as arbitrators. Governance cannot bypass dispute-state validation: a resolution requires an existing dispute in the `Active` state. Resolution is atomic: escrow balance transfer and dispute state transition either both succeed or both revert. A dispute in the `Resolved` state cannot be resolved again, which prevents replayed or duplicate resolutions.
+
+Resolution outcomes:
+
+- `ReleaseToFreelancer` (`release_to_freelancer = true`): funds are transferred to the freelancer.
+- `RefundToClient` (`release_to_freelancer = false`): funds are returned to the client.
+
+Failed resolution attempts leave escrow balances and dispute state unchanged.
 
 ## Events
 
@@ -54,7 +70,7 @@ All standardized events use the PascalCase type names below in contract source a
 | `PaymentReleased` / `payment_released` | `contract_id`, `milestone_id`, `actor` | `recipient`, `amount` |
 | `DisputeRaised` / `dispute_raised` | `contract_id`, `milestone_id`, `actor` | none |
 | `RefundIssued` / `refund_issued` | `contract_id`, `milestone_id`, `actor` | `recipient`, `amount` |
-| `DisputeResolved` / `dispute_resolved` | `contract_id`, `milestone_id`, `actor` | `recipient`, `amount`, `release_to_freelancer` |
+| `DisputeResolved` / `dispute_resolved` | `contract_id`, `milestone_id`, `actor` | `escrow_id`, `resolver`, `outcome`, `recipient`, `amount`, `release_to_freelancer`, `ledger` |
 | `MilestoneExpired` / `milestone_expired` | `contract_id`, `milestone_id`, `actor` | `recipient`, `amount` |
 | `DeadlineSet` / `deadline_set` | `contract_id`, `milestone_id`, `actor` | `deadline` |
 | `DeadlineExpired` / `deadline_expired` | `contract_id`, `milestone_id`, `actor` | `deadline` |
@@ -68,6 +84,8 @@ request a later deadline and only the arbitrator can approve it. Approval
 transitions `Expired` to `Extended`. A submitted/approved milestone may still
 enter dispute after expiry, in which case its funds remain locked until the
 arbitrator resolves it. Expiry never transfers funds automatically.
+
+Every successful `DisputeResolved` event includes the escrow identifier (`escrow_id`), the resolver identity (`resolver`), the resolution outcome (`outcome`: `release_to_freelancer` or `refund_to_client`), the recipient and amount transferred, and the ledger sequence (`ledger`) at which the resolution was executed, providing an auditable trail for every fund movement from arbitration.
 
 ### Dispute events
 
