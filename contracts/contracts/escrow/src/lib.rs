@@ -20,6 +20,20 @@ pub enum MilestoneStatus {
     Extended = 11,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[contracttype]
+pub enum EscrowStatus {
+    Created = 0,
+    Funded = 1,
+    InProgress = 2,
+    Submitted = 3,
+    Approved = 4,
+    Disputed = 5,
+    PartiallySettled = 6,
+    Completed = 7,
+    Expired = 8,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[contracttype]
 pub struct Milestone {
@@ -30,6 +44,37 @@ pub struct Milestone {
     pub description: String,
     pub client_approved: bool,
     pub freelancer_approved: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub struct MilestoneState {
+    pub id: u32,
+    pub deadline: u64,
+    pub allocated_amount: i128,
+    pub released_amount: i128,
+    pub refunded_amount: i128,
+    pub remaining_amount: i128,
+    pub status: MilestoneStatus,
+    pub completed: bool,
+    pub client_approved: bool,
+    pub freelancer_approved: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[contracttype]
+pub struct EscrowState {
+    pub client: Address,
+    pub freelancer: Address,
+    pub arbiter: Address,
+    pub token: Address,
+    pub allocated_amount: i128,
+    pub released_amount: i128,
+    pub refunded_amount: i128,
+    pub remaining_balance: i128,
+    pub funded: bool,
+    pub status: EscrowStatus,
+    pub milestones: Vec<MilestoneState>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,8 +90,10 @@ pub enum DataKey {
     Milestone(u32),
     MilestoneIds,
     EscrowBalance,
+    Governance,
     PendingDeadline(u32),
     ExpiredFrom(u32),
+    ResolvedToFreelancer(u32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -201,6 +248,20 @@ pub struct DisputeResolved {
 }
 
 #[contractevent]
+pub struct DisputeResolutionRecorded {
+    #[topic]
+    pub contract_id: Address,
+    #[topic]
+    pub milestone_id: u32,
+    #[topic]
+    pub actor: Address,
+    pub recipient: Address,
+    pub amount: i128,
+    pub release_to_freelancer: bool,
+    pub ledger_timestamp: u64,
+}
+
+#[contractevent]
 pub struct MilestoneExpired {
     #[topic]
     pub contract_id: Address,
@@ -290,6 +351,41 @@ fn mark_milestone_expired(
 
 #[contract]
 pub struct EscrowContract;
+
+fn build_milestone_state(env: &Env, milestone: &Milestone) -> MilestoneState {
+    let (released_amount, refunded_amount) = match milestone.status {
+        MilestoneStatus::Released => (milestone.amount, 0),
+        MilestoneStatus::Refunded => (0, milestone.amount),
+        MilestoneStatus::Resolved => {
+            let to_freelancer: bool = env
+                .storage()
+                .instance()
+                .get(&DataKey::ResolvedToFreelancer(milestone.id))
+                .unwrap_or(false);
+            if to_freelancer {
+                (milestone.amount, 0)
+            } else {
+                (0, milestone.amount)
+            }
+        }
+        _ => (0, 0),
+    };
+    MilestoneState {
+        id: milestone.id,
+        deadline: milestone.deadline,
+        allocated_amount: milestone.amount,
+        released_amount,
+        refunded_amount,
+        remaining_amount: milestone.amount - released_amount - refunded_amount,
+        status: milestone.status,
+        completed: matches!(
+            milestone.status,
+            MilestoneStatus::Released | MilestoneStatus::Refunded | MilestoneStatus::Resolved
+        ),
+        client_approved: milestone.client_approved,
+        freelancer_approved: milestone.freelancer_approved,
+    }
+}
 
 #[contractimpl]
 impl EscrowContract {
@@ -737,6 +833,9 @@ impl EscrowContract {
         }
         balance -= transfer_amount;
         env.storage().instance().set(&DataKey::EscrowBalance, &balance);
+        env.storage()
+            .instance()
+            .set(&DataKey::ResolvedToFreelancer(milestone_id), &release_to_freelancer);
         milestone.status = MilestoneStatus::Resolved;
         env.storage().instance().set(&DataKey::Milestone(milestone_id), &milestone);
         env.storage()
@@ -913,6 +1012,93 @@ impl EscrowContract {
     }
 
     // --- State Getters ---
+
+    pub fn get_escrow_state(env: Env) -> Result<EscrowState, Error> {
+        let client: Address = env.storage().instance().get(&DataKey::Client).ok_or(Error::NotInitialized)?;
+        let freelancer: Address = env.storage().instance().get(&DataKey::Freelancer).ok_or(Error::NotInitialized)?;
+        let arbiter: Address = env.storage().instance().get(&DataKey::Arbiter).ok_or(Error::NotInitialized)?;
+        let token: Address = env.storage().instance().get(&DataKey::Token).ok_or(Error::NotInitialized)?;
+        let funded: bool = env.storage().instance().get(&DataKey::IsFunded).unwrap_or(false);
+        let remaining_balance: i128 = env.storage().instance().get(&DataKey::EscrowBalance).unwrap_or(0);
+        let ids: Vec<u32> = env.storage().instance().get(&DataKey::MilestoneIds).ok_or(Error::NotInitialized)?;
+
+        let mut allocated_amount = 0i128;
+        let mut released_amount = 0i128;
+        let mut refunded_amount = 0i128;
+        let mut milestones = Vec::new(&env);
+        let mut has_disputed = false;
+        let mut has_approved = false;
+        let mut has_submitted = false;
+        let mut has_in_progress = false;
+        let mut has_expired = false;
+        let mut has_settled = false;
+        let mut all_settled = true;
+
+        for i in 0..ids.len() {
+            let id = ids.get(i).unwrap();
+            let milestone: Milestone = env.storage().instance().get(&DataKey::Milestone(id)).ok_or(Error::MilestoneNotFound)?;
+            let state = build_milestone_state(&env, &milestone);
+            allocated_amount += milestone.amount;
+            released_amount += state.released_amount;
+            refunded_amount += state.refunded_amount;
+            has_disputed |= milestone.status == MilestoneStatus::Disputed;
+            has_approved |= milestone.status == MilestoneStatus::Approved;
+            has_submitted |= milestone.status == MilestoneStatus::Submitted;
+            has_in_progress |= matches!(
+                milestone.status,
+                MilestoneStatus::InProgress | MilestoneStatus::Extended
+            );
+            has_expired |= matches!(
+                milestone.status,
+                MilestoneStatus::Expired | MilestoneStatus::AutoExpired
+            );
+            has_settled |= state.completed;
+            all_settled &= state.completed;
+            milestones.push_back(state);
+        }
+
+        let status = if !funded {
+            EscrowStatus::Created
+        } else if has_disputed {
+            EscrowStatus::Disputed
+        } else if all_settled {
+            EscrowStatus::Completed
+        } else if has_settled {
+            EscrowStatus::PartiallySettled
+        } else if has_approved {
+            EscrowStatus::Approved
+        } else if has_submitted {
+            EscrowStatus::Submitted
+        } else if has_in_progress {
+            EscrowStatus::InProgress
+        } else if has_expired {
+            EscrowStatus::Expired
+        } else {
+            EscrowStatus::Funded
+        };
+
+        Ok(EscrowState {
+            client,
+            freelancer,
+            arbiter,
+            token,
+            allocated_amount,
+            released_amount,
+            refunded_amount,
+            remaining_balance,
+            funded,
+            status,
+            milestones,
+        })
+    }
+
+    pub fn get_milestone_state(env: Env, milestone_id: u32) -> Result<MilestoneState, Error> {
+        if !env.storage().instance().has(&DataKey::Client) {
+            return Err(Error::NotInitialized);
+        }
+        let milestone: Milestone = env.storage().instance().get(&DataKey::Milestone(milestone_id)).ok_or(Error::MilestoneNotFound)?;
+        Ok(build_milestone_state(&env, &milestone))
+    }
 
     pub fn get_milestones(env: Env) -> Result<Vec<Milestone>, Error> {
         let ids: Vec<u32> = env.storage().instance().get(&DataKey::MilestoneIds).ok_or(Error::NotInitialized)?;

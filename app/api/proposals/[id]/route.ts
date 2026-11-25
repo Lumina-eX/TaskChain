@@ -31,10 +31,12 @@ import {
   findProposalWithProject,
   findUserByWallet,
   isEditable,
+  isUniqueViolation,
   ok,
   updateProposalContent,
   updateProposalStatus,
   zodErrors,
+  type Proposal,
 } from "@/lib/proposals";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -78,6 +80,9 @@ export const PATCH = withProposalAuth<RouteContext>(
         if (clientId !== user.id) {
           return failOne(403, "FORBIDDEN", "Only the project's client can change a proposal's status");
         }
+        if (proposal.status === nextStatus) {
+          return ok(proposal);
+        }
         if (!canTransition(proposal.status, nextStatus)) {
           return failOne(
             409,
@@ -85,7 +90,19 @@ export const PATCH = withProposalAuth<RouteContext>(
             `Cannot move a proposal from '${proposal.status}' to '${nextStatus}'`,
           );
         }
-        const updated = await updateProposalStatus(proposal, nextStatus);
+        let updated: Proposal | null;
+        try {
+          updated = await updateProposalStatus(proposal, nextStatus, user.id);
+        } catch (err) {
+          if (isUniqueViolation(err)) {
+            return failOne(
+              409,
+              "PROJECT_ALREADY_AWARDED",
+              "Another proposal has already been accepted for this project",
+            );
+          }
+          throw err;
+        }
         if (!updated) {
           return failOne(409, "PROPOSAL_CHANGED", "The proposal was modified concurrently; reload and retry");
         }
@@ -126,6 +143,9 @@ export const PATCH = withProposalAuth<RouteContext>(
       return ok(updated);
     } catch (err) {
       console.error(`[PATCH /api/proposals/${proposalId}]`, err);
+      if ((err as { code?: string })?.code === "23505") {
+        return failOne(409, "PROJECT_ALREADY_HAS_ACCEPTED_PROPOSAL", "This project already has an accepted proposal");
+      }
       return failOne(500, "PROPOSAL_UPDATE_FAILED", "Failed to update proposal");
     }
   },

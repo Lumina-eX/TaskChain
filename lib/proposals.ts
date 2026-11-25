@@ -232,6 +232,10 @@ export interface Proposal {
   id: string;
   projectId: string;
   freelancerId: string;
+  freelancerName?: string;
+  freelancerSkills?: string[];
+  freelancerRating?: number;
+  freelancerPastContracts?: number;
   message: string;
   budget: number;
   deliveryTime: number;
@@ -255,6 +259,12 @@ export function rowToProposal(row: Record<string, unknown>): Proposal {
     id: String(row.id),
     projectId: String(row.project_id),
     freelancerId: String(row.freelancer_id),
+    freelancerName: row.freelancer_name ? String(row.freelancer_name) : undefined,
+    freelancerSkills: Array.isArray(row.freelancer_skills)
+      ? (row.freelancer_skills as string[])
+      : [],
+    freelancerRating: Number(row.freelancer_rating ?? 0),
+    freelancerPastContracts: Number(row.freelancer_completed ?? 0),
     message: row.message as string,
     budget: Number(row.budget),
     deliveryTime: Number(row.delivery_time),
@@ -405,8 +415,14 @@ export async function listProposals(opts: ListProposalsOptions): Promise<Proposa
   const freelancerFilter = freelancerId ?? null;
 
   const rows = (await sql`
-    SELECT pp.*, COUNT(*) OVER() AS total_count
+    SELECT pp.*,
+      u.username AS freelancer_name,
+      u.skills AS freelancer_skills,
+      u.avg_rating AS freelancer_rating,
+      u.completed_jobs AS freelancer_completed,
+      COUNT(*) OVER() AS total_count
     FROM project_proposals pp
+    JOIN users u ON u.id = pp.freelancer_id
     WHERE pp.project_id = ${projectId}
       AND (${statusFilter}::proposal_status IS NULL OR pp.status = ${statusFilter}::proposal_status)
       AND (${freelancerFilter}::uuid IS NULL OR pp.freelancer_id = ${freelancerFilter}::uuid)
@@ -464,16 +480,56 @@ export async function updateProposalContent(
 export async function updateProposalStatus(
   current: Proposal,
   next: ProposalStatus,
+  actorId: string,
 ): Promise<Proposal | null> {
+  if (next === "accepted") return acceptProposal(current);
+
   const rows = (await sql`
-    UPDATE project_proposals
-    SET status = ${next}::proposal_status,
-        updated_at = NOW()
-    WHERE id = ${current.id}
-      AND status = ${current.status}::proposal_status
-    RETURNING *
+    WITH changed AS (
+      UPDATE project_proposals AS pp
+      SET status = ${next}::proposal_status,
+          updated_at = NOW()
+      FROM projects AS p
+      WHERE pp.id = ${current.id}
+        AND pp.project_id = p.id
+        AND p.client_id = ${actorId}
+        AND pp.status = ${current.status}::proposal_status
+      RETURNING pp.*
+    ), audited AS (
+      INSERT INTO project_proposal_audit_logs
+        (proposal_id, project_id, actor_id, action, previous_status, new_status)
+      SELECT id, project_id, ${actorId},
+        CASE ${next}::proposal_status
+          WHEN 'under_review' THEN 'shortlist'
+          WHEN 'accepted' THEN 'accept'
+          WHEN 'rejected' THEN 'reject'
+        END,
+        ${current.status}::proposal_status, ${next}::proposal_status
+      FROM changed
+      RETURNING proposal_id
+    )
+    SELECT changed.*
+    FROM changed
+    JOIN audited ON audited.proposal_id = changed.id
   `) as Array<Record<string, unknown>>;
-  if (!rows.length) return null;
+
+  if (!rows.length) {
+    // A concurrent identical request is a successful no-op; ownership is
+    // rechecked so a stale authorization read cannot authorize the retry.
+    const unchanged = (await sql`
+      SELECT pp.*
+      FROM project_proposals pp
+      JOIN projects p ON p.id = pp.project_id
+      WHERE pp.id = ${current.id}
+        AND pp.status = ${next}::proposal_status
+        AND p.client_id = ${actorId}
+      LIMIT 1
+    `) as Array<Record<string, unknown>>;
+    if (!unchanged.length) return null;
+    invalidateProjectProposals(current.projectId);
+    return rowToProposal(unchanged[0]);
+  }
+
   invalidateProjectProposals(current.projectId);
   return rowToProposal(rows[0]);
 }
@@ -487,4 +543,70 @@ export async function deleteProposal(proposal: Proposal): Promise<boolean> {
   `) as Array<Record<string, unknown>>;
   if (rows.length) invalidateProjectProposals(proposal.projectId);
   return rows.length > 0;
+}
+
+
+/**
+ * Issue #217 - accepts a proposal and, in ONE atomic statement, creates the
+ * contract (pending_funding, escrow unfunded), its milestones from the
+ * proposal breakdown, and an audit row. Any failing step rolls all of it back.
+ * Returns null if the proposal/project is no longer eligible (409 upstream).
+ * A concurrent double-accept hits uq_project_proposals_one_accepted (23505).
+ */
+export async function acceptProposal(
+  current: Proposal,
+): Promise<(Proposal & { contractId: string }) | null> {
+  const rows = (await sql`
+    WITH p AS (
+      UPDATE project_proposals pp
+      SET status = 'accepted'::proposal_status, updated_at = NOW()
+      FROM projects pr
+      WHERE pp.id = ${current.id}
+        AND pp.status = ${current.status}::proposal_status
+        AND pr.id = pp.project_id
+        AND pr.status::text IN ('open', 'active')
+        AND NOT EXISTS (
+          SELECT 1 FROM contracts c
+          WHERE c.project_id = pp.project_id AND c.status::text <> 'cancelled'
+        )
+      RETURNING pp.*, pr.client_id AS project_client_id
+    ), c AS (
+      INSERT INTO contracts
+        (project_id, client_id, freelancer_id, proposal_id, total_amount, status, escrow_status)
+      SELECT project_id, project_client_id, freelancer_id, id, budget,
+             'pending_funding'::contract_status, 'unfunded'::escrow_status
+      FROM p
+      RETURNING id, project_id
+    ), m AS (
+      INSERT INTO milestones
+        (project_id, contract_id, title, sort_order, amount, due_date)
+      SELECT c.project_id, c.id, e.value->>'title', (e.ord - 1)::smallint,
+             (e.value->>'amount')::numeric,
+             CASE WHEN e.value ? 'dueInDays'
+                  THEN NOW() + ((e.value->>'dueInDays')::int * INTERVAL '1 day') END
+      FROM c, p, jsonb_array_elements(p.milestones) WITH ORDINALITY AS e(value, ord)
+      RETURNING id
+    ), a AS (
+      INSERT INTO contract_state_logs
+        (contract_id, previous_status, new_status, changed_by_user_id, reason)
+      SELECT c.id, NULL, 'pending_funding'::contract_status, p.project_client_id,
+             'Proposal ' || p.id || ' accepted; contract created; escrow initialised (unfunded)'
+      FROM c, p
+      RETURNING id
+    ), l AS (
+      INSERT INTO proposal_acceptance_audit_logs
+        (event, proposal_id, contract_id, actor_id, metadata)
+      SELECT ev.event, p.id, c.id, p.project_client_id,
+             jsonb_build_object('project_id', p.project_id)
+      FROM p, c,
+           (VALUES ('proposal_accepted'), ('contract_created'), ('escrow_initialized')) AS ev(event)
+      RETURNING id
+    )
+    SELECT p.*, c.id AS contract_id FROM p, c
+  `) as Array<Record<string, unknown>>;
+  if (!rows.length) return null;
+  invalidateProjectProposals(current.projectId);
+  return Object.assign(rowToProposal(rows[0]), {
+    contractId: String(rows[0].contract_id),
+  });
 }

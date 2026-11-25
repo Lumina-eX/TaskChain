@@ -24,6 +24,11 @@ Contract methods that can fail return `Result<_, Error>`. Soroban exposes the en
 | Escrow | 14 | `ExtensionNotFound` | `ERR_EXTENSION_NOT_FOUND` |
 | Escrow | 15 | `DuplicateMilestoneId` | `ERR_DUPLICATE_MILESTONE_ID` |
 | Escrow | 16 | `InsufficientBalance` | `ERR_INSUFFICIENT_BALANCE` |
+| Escrow | 17 | `ArbitratorNotAuthorized` | `ERR_ARBITRATOR_NOT_AUTHORIZED` |
+| Escrow | 18 | `DisputeNotFound` | `ERR_DISPUTE_NOT_FOUND` |
+| Escrow | 19 | `DisputeNotActive` | `ERR_DISPUTE_NOT_ACTIVE` |
+| Escrow | 20 | `DisputeAlreadyResolved` | `ERR_DISPUTE_ALREADY_RESOLVED` |
+| Escrow | 21 | `InvalidResolutionOutcome` | `ERR_INVALID_RESOLUTION_OUTCOME` |
 | Dispute | 1 | `AlreadyInitialized` | `ERR_ALREADY_INITIALIZED` |
 | Dispute | 2 | `NotInitialized` | `ERR_NOT_INITIALIZED` |
 | Dispute | 3 | `DisputeNotFound` | `ERR_DISPUTE_NOT_FOUND` |
@@ -37,6 +42,95 @@ Contract methods that can fail return `Result<_, Error>`. Soroban exposes the en
 | Dispute | 11 | `DisputeNotResolved` | `ERR_DISPUTE_NOT_RESOLVED` |
 
 Numeric values are append-only ABI values. If a new failure is added, append a new variant and never renumber an existing one.
+
+### Arbitration authorization
+
+Arbitration actions on the escrow contract are restricted to an explicitly authorized arbitrator address set at escrow creation (`arbiter`) or an approved governance address registered by the escrow admin. Clients and freelancers cannot act as arbitrators. Governance cannot bypass dispute-state validation: a resolution requires an existing dispute in the `Active` state. Resolution is atomic: escrow balance transfer and dispute state transition either both succeed or both revert. A dispute in the `Resolved` state cannot be resolved again, which prevents replayed or duplicate resolutions.
+
+Resolution outcomes:
+
+- `ReleaseToFreelancer` (`release_to_freelancer = true`): funds are transferred to the freelancer.
+- `RefundToClient` (`release_to_freelancer = false`): funds are returned to the client.
+
+Failed resolution attempts leave escrow balances and dispute state unchanged.
+
+## Permissionless state queries
+
+The escrow contract exposes `get_escrow_state()` and `get_milestone_state(milestone_id)` as read-only calls. They require no authorization and do not write storage or emit events. Call them against the escrow contract address on the same Stellar network as the contract; for example, use the Soroban RPC `simulateTransaction` method with a contract invocation and do not submit the simulated transaction.
+
+With a generated Soroban contract client, the invocations are:
+
+```rust
+let escrow_state = escrow_client.get_escrow_state();
+let milestone_state = escrow_client.get_milestone_state(&1);
+```
+
+`get_escrow_state()` returns participants (`client`, `freelancer`, `arbiter`), the supported token contract address (`token`), the funding flag, aggregate amounts, current status, and a `milestones` array. `get_milestone_state()` returns the same milestone representation for one ID. Amounts are signed integers in the token's smallest units; convert for display using the token's decimals. `allocated_amount` is the sum of milestone allocations. `released_amount` is value transferred to the freelancer by `release` or dispute resolution; `refunded_amount` is value returned to the client by `refund` or dispute resolution. `remaining_amount` is the milestone allocation not yet settled. At escrow level, `remaining_balance` comes from the contract's `EscrowBalance` accounting and is zero before funding. The JSON below is a decoded representation (enum values are shown by their names).
+
+### Escrow status mapping
+
+The aggregate `status` uses this precedence, so mixed milestone states map deterministically:
+
+| Status | Meaning |
+| --- | --- |
+| `Created` | Escrow has not been funded. |
+| `Disputed` | At least one milestone is disputed. |
+| `Completed` | Every milestone is released, refunded, or resolved. |
+| `PartiallySettled` | At least one milestone is settled and at least one is not. |
+| `Approved` | No higher-priority state applies and at least one milestone is approved. |
+| `Submitted` | No higher-priority state applies and at least one milestone is submitted. |
+| `InProgress` | No higher-priority state applies and at least one milestone is in progress or extended. |
+| `Expired` | No higher-priority state applies and at least one milestone is expired or auto-expired. |
+| `Funded` | Funded; all milestones remain in an earlier state. |
+
+Milestone `status` remains the canonical detailed lifecycle value (`Created`, `Funded`, `InProgress`, `Submitted`, `Approved`, `Released`, `Refunded`, `Disputed`, `Resolved`, `AutoExpired`, `Expired`, `Extended`). `completed` is true only for `Released`, `Refunded`, and `Resolved`.
+
+### Example response
+
+```json
+{
+  "client": "G...",
+  "freelancer": "G...",
+  "arbiter": "G...",
+  "token": "C...",
+  "allocated_amount": 300,
+  "released_amount": 100,
+  "refunded_amount": 0,
+  "remaining_balance": 200,
+  "funded": true,
+  "status": "PartiallySettled",
+  "milestones": [
+    {
+      "id": 1,
+      "deadline": 2000000000,
+      "allocated_amount": 100,
+      "released_amount": 100,
+      "refunded_amount": 0,
+      "remaining_amount": 0,
+      "status": "Released",
+      "completed": true,
+      "client_approved": true,
+      "freelancer_approved": false
+    },
+    {
+      "id": 2,
+      "deadline": 2000000000,
+      "allocated_amount": 200,
+      "released_amount": 0,
+      "refunded_amount": 0,
+      "remaining_amount": 200,
+      "status": "Funded",
+      "completed": false,
+      "client_approved": false,
+      "freelancer_approved": false
+    }
+  ]
+}
+```
+
+Generated Soroban clients expose typed `get_escrow_state` and `get_milestone_state` calls. For other clients, decode the returned Soroban `ScVal` using the contract's generated XDR schema; preserve integer amounts without converting to floating point. Treat `NotInitialized` (error 2) as an uninitialized/nonexistent escrow contract and `MilestoneNotFound` (error 5) as an invalid milestone ID. A malformed address, unknown contract, or RPC/network failure occurs before contract execution and is reported by the RPC layer, not as an escrow contract error.
+
+Frontend and backend consumers should treat these on-chain responses as authoritative for escrow and milestone state. Database/indexer data can be used for search and presentation, but should be reconciled with these contract views (or a verified ledger snapshot) before presenting balances as authoritative. All clients should use the same contract ABI, network, and ledger context when comparing results.
 
 ## Events
 
@@ -54,7 +148,7 @@ All standardized events use the PascalCase type names below in contract source a
 | `PaymentReleased` / `payment_released` | `contract_id`, `milestone_id`, `actor` | `recipient`, `amount` |
 | `DisputeRaised` / `dispute_raised` | `contract_id`, `milestone_id`, `actor` | none |
 | `RefundIssued` / `refund_issued` | `contract_id`, `milestone_id`, `actor` | `recipient`, `amount` |
-| `DisputeResolved` / `dispute_resolved` | `contract_id`, `milestone_id`, `actor` | `recipient`, `amount`, `release_to_freelancer` |
+| `DisputeResolved` / `dispute_resolved` | `contract_id`, `milestone_id`, `actor` | `escrow_id`, `resolver`, `outcome`, `recipient`, `amount`, `release_to_freelancer`, `ledger` |
 | `MilestoneExpired` / `milestone_expired` | `contract_id`, `milestone_id`, `actor` | `recipient`, `amount` |
 | `DeadlineSet` / `deadline_set` | `contract_id`, `milestone_id`, `actor` | `deadline` |
 | `DeadlineExpired` / `deadline_expired` | `contract_id`, `milestone_id`, `actor` | `deadline` |
@@ -68,6 +162,8 @@ request a later deadline and only the arbitrator can approve it. Approval
 transitions `Expired` to `Extended`. A submitted/approved milestone may still
 enter dispute after expiry, in which case its funds remain locked until the
 arbitrator resolves it. Expiry never transfers funds automatically.
+
+Every successful `DisputeResolved` event includes the escrow identifier (`escrow_id`), the resolver identity (`resolver`), the resolution outcome (`outcome`: `release_to_freelancer` or `refund_to_client`), the recipient and amount transferred, and the ledger sequence (`ledger`) at which the resolution was executed, providing an auditable trail for every fund movement from arbitration.
 
 ### Dispute events
 
