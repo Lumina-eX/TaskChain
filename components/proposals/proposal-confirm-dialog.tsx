@@ -13,8 +13,9 @@ import {
 
 interface Props {
   open: boolean;
-  action: "accept" | "reject" | null;
+  action: "shortlist" | "accept" | "reject" | null;
   freelancerName?: string;
+  submitting?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }
@@ -23,27 +24,37 @@ export function ProposalConfirmDialog({
   open,
   action,
   freelancerName,
+  submitting,
   onCancel,
   onConfirm,
 }: Props) {
   const isAccept = action === "accept";
+  const isShortlist = action === "shortlist";
   return (
     <AlertDialog open={open} onOpenChange={(o) => !o && onCancel()}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {isAccept ? "Accept proposal?" : "Reject proposal?"}
+            {isShortlist ? "Shortlist proposal?" : isAccept ? "Accept proposal?" : "Reject proposal?"}
           </AlertDialogTitle>
           <AlertDialogDescription>
-            {isAccept
-              ? `Accepting ${freelancerName ?? "this freelancer"}'s proposal will notify them and start the project.`
-              : `Rejecting ${freelancerName ?? "this freelancer"}'s proposal will notify them.`}
+            {isShortlist
+              ? `Shortlist ${freelancerName ?? "this freelancer"}'s proposal for further review.`
+              : isAccept
+              ? `Accepting ${freelancerName ?? "this freelancer"}'s proposal will select it for this project. Only one proposal can be accepted.`
+              : `Reject ${freelancerName ?? "this freelancer"}'s proposal and close it for this project.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel onClick={onCancel}>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm}>
-            {isAccept ? "Accept" : "Reject"}
+          <AlertDialogAction disabled={submitting} onClick={onConfirm}>
+            {submitting
+              ? "Saving..."
+              : isShortlist
+              ? "Shortlist"
+              : isAccept
+              ? "Accept"
+              : "Reject"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
