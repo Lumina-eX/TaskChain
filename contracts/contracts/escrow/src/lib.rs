@@ -90,6 +90,7 @@ pub enum DataKey {
     Milestone(u32),
     MilestoneIds,
     EscrowBalance,
+    Governance,
     PendingDeadline(u32),
     ExpiredFrom(u32),
     ResolvedToFreelancer(u32),
@@ -244,6 +245,20 @@ pub struct DisputeResolved {
     pub recipient: Address,
     pub amount: i128,
     pub release_to_freelancer: bool,
+}
+
+#[contractevent]
+pub struct DisputeResolutionRecorded {
+    #[topic]
+    pub contract_id: Address,
+    #[topic]
+    pub milestone_id: u32,
+    #[topic]
+    pub actor: Address,
+    pub recipient: Address,
+    pub amount: i128,
+    pub release_to_freelancer: bool,
+    pub ledger_timestamp: u64,
 }
 
 #[contractevent]

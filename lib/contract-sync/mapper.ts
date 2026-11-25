@@ -32,6 +32,15 @@ export interface MilestoneStatusUpdate {
   rejectionReason?: string | null
 }
 
+export interface DisputeResolutionMetadata {
+  escrowId?: string
+  outcome: 'release_to_freelancer' | 'refund_to_client'
+  resolverAddress?: string
+  ledger?: number
+  timestamp: string
+  authorizationSource: 'arbitrator' | 'governance' | 'unknown'
+}
+
 export interface SyncAction {
   kind: 'update_contract' | 'update_milestone' | 'update_both' | 'create_dispute' | 'noop'
   contractUpdate: ContractStatusUpdate | null
@@ -41,10 +50,28 @@ export interface SyncAction {
     milestoneId?: number
     reason?: string
   } | null
+  resolutionMetadata?: DisputeResolutionMetadata | null
 }
 
 function nowISO(): string {
   return new Date().toISOString()
+}
+
+function resolveOutcome(data: SorobanEventPayload): 'release_to_freelancer' | 'refund_to_client' | null {
+  if (typeof data.releaseToFreelancer === 'boolean') {
+    return data.releaseToFreelancer ? 'release_to_freelancer' : 'refund_to_client'
+  }
+  if (data.outcome === 'release_to_freelancer' || data.outcome === 'refund_to_client') {
+    return data.outcome
+  }
+  return null
+}
+
+function resolveAuthSource(data: SorobanEventPayload): 'arbitrator' | 'governance' | 'unknown' {
+  if (data.authorizationSource === 'arbitrator' || data.authorizationSource === 'governance') {
+    return data.authorizationSource
+  }
+  return 'unknown'
 }
 
 export function mapEventToAction(event: SorobanContractEvent, data: SorobanEventPayload): SyncAction {
@@ -160,12 +187,26 @@ export function mapEventToAction(event: SorobanContractEvent, data: SorobanEvent
       }
 
     case 'dispute_resolved': {
-      const resolvedToFreelancer = data.releaseToFreelancer !== false
+      const outcome = resolveOutcome(data)
+      // Fail closed: an unrecognized or missing outcome must not move funds in the mirror.
+      if (outcome === null) {
+        return {
+          kind: 'noop',
+          contractUpdate: null,
+          milestoneUpdate: null,
+          milestoneId: null,
+          disputeInfo: null,
+          resolutionMetadata: null,
+        }
+      }
+
+      const resolvedToFreelancer = outcome === 'release_to_freelancer'
       return {
         kind: 'update_both',
         contractUpdate: {
           escrowStatus: resolvedToFreelancer ? 'fully_released' : 'refunded',
           contractStatus: resolvedToFreelancer ? 'completed' : 'cancelled',
+          activeDisputeId: null,
           ...(resolvedToFreelancer
             ? { completedAt: nowISO() }
             : { cancelledAt: nowISO(), cancelledReason: 'Dispute resolved in client favor' }),
@@ -175,6 +216,14 @@ export function mapEventToAction(event: SorobanContractEvent, data: SorobanEvent
           : { status: 'refunded', rejectionReason: 'Dispute resolved in client favor' },
         milestoneId: data.milestoneId ?? null,
         disputeInfo: null,
+        resolutionMetadata: {
+          escrowId: data.escrowId !== undefined ? String(data.escrowId) : undefined,
+          outcome,
+          resolverAddress: data.resolver,
+          ledger: data.ledger,
+          timestamp: nowISO(),
+          authorizationSource: resolveAuthSource(data),
+        },
       }
     }
 
