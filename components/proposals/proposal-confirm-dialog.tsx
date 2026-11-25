@@ -13,7 +13,7 @@ import {
 
 interface Props {
   open: boolean;
-  action: "accept" | "reject" | null;
+  action: "shortlist" | "accept" | "reject" | null;
   freelancerName?: string;
   isSubmitting?: boolean;
   error?: string | null;
@@ -31,6 +31,7 @@ export function ProposalConfirmDialog({
   onConfirm,
 }: Props) {
   const isAccept = action === "accept";
+  const isShortlist = action === "shortlist";
   const name = freelancerName ?? "this freelancer";
 
   return (
@@ -43,12 +44,14 @@ export function ProposalConfirmDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {isAccept ? "Accept proposal?" : "Reject proposal?"}
+            {isShortlist ? "Shortlist proposal?" : isAccept ? "Accept proposal?" : "Reject proposal?"}
           </AlertDialogTitle>
           <AlertDialogDescription>
-            {isAccept
-              ? `Accepting ${name}'s proposal will notify them and start the project.`
-              : `Rejecting ${name}'s proposal will notify them.`}
+            {isShortlist
+              ? `Shortlist ${name}'s proposal for further review.`
+              : isAccept
+              ? `Accepting ${name}'s proposal will select it for this project. Only one proposal can be accepted.`
+              : `Rejecting ${name}'s proposal will notify them and close it for this project.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {error && (
@@ -72,9 +75,11 @@ export function ProposalConfirmDialog({
               ? isAccept
                 ? "Accepting..."
                 : "Rejecting..."
+              : isShortlist
+              ? "Shortlist"
               : isAccept
-                ? "Accept"
-                : "Reject"}
+              ? "Accept"
+              : "Reject"}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

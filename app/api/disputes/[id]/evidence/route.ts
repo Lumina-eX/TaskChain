@@ -15,6 +15,15 @@ import {
   removeEncryptedFile,
   storeEncryptedFile,
 } from "@/lib/security/fileEncryption";
+import {
+  disputeWorkflowService,
+  isUuid,
+  parseSubmitEvidenceInput,
+} from "@/lib/disputes";
+import {
+  disputeErrorResponse,
+  invalidJsonResponse,
+} from "@/lib/disputes/http";
 
 type RouteContext = { params: Promise<{ id: string }> };
 type AuthLike = { walletAddress: string };
@@ -152,6 +161,27 @@ async function logEvidenceAction(
 export const GET = withAuthCtx(
   async (request: NextRequest, auth, context: RouteContext) => {
     const { id } = await context.params;
+
+    // Contract-scoped (UUID) disputes are served by the dispute workflow, which
+    // enforces participant/arbitrator authorization before returning evidence.
+    if (isUuid(id)) {
+      try {
+        const result = await disputeWorkflowService.getDispute(
+          id,
+          auth.walletAddress,
+        );
+        return NextResponse.json(
+          {
+            evidence: result.evidence,
+            resolutionAttempt: result.resolutionAttempt,
+          },
+          { status: 200 },
+        );
+      } catch (error) {
+        return disputeErrorResponse(error);
+      }
+    }
+
     try {
       const access = await getDisputeAccess(id, auth.walletAddress);
       if (isAccessResponse(access)) return access;
@@ -217,6 +247,42 @@ export const GET = withAuthCtx(
 export const POST = withAuthCtx(
   async (request: NextRequest, auth, context: RouteContext) => {
     const { id } = await context.params;
+
+    // Contract-scoped disputes accept JSON evidence references. Legacy
+    // job-scoped disputes keep the multipart upload path below.
+    if (isUuid(id)) {
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return invalidJsonResponse();
+      }
+
+      try {
+        const parsed = parseSubmitEvidenceInput(
+          body,
+          request.headers.get("idempotency-key"),
+        );
+        const result = await disputeWorkflowService.submitEvidence({
+          disputeId: id,
+          actorWalletAddress: auth.walletAddress,
+          references: parsed.references,
+          description: parsed.description,
+          idempotencyKey: parsed.idempotencyKey,
+        });
+
+        return NextResponse.json(
+          {
+            evidence: result.evidence,
+            duplicates: result.duplicates,
+            replayed: result.evidence.length === 0,
+          },
+          { status: result.evidence.length === 0 ? 200 : 201 },
+        );
+      } catch (error) {
+        return disputeErrorResponse(error);
+      }
+    }
 
     let formData: FormData;
     try {

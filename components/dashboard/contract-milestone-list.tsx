@@ -4,6 +4,7 @@ import { CheckCircle2, Clock, AlertCircle, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
+import { formatAssetAmount } from "@/lib/escrow/funding";
 
 export interface ContractMilestone {
   id: string;
@@ -78,9 +79,7 @@ export function ContractMilestoneList({ milestones, isLoading }: { milestones: C
             </div>
             <div className="text-right shrink-0 ml-4 flex items-start gap-3">
               <div className="text-right">
-                <p className="font-semibold">
-                  ${parseFloat(m.amount).toLocaleString()} {m.currency}
-                </p>
+                <p className="font-semibold">{formatAssetAmount(m.amount, m.currency)}</p>
                 <p className={`text-xs mt-1 flex items-center justify-end gap-1 ${config.color}`}>
                   <Icon className="h-3.5 w-3.5" />
                   {config.label}
