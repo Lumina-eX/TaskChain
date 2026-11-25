@@ -12,6 +12,7 @@ import { ContractMilestoneList, type ContractMilestone } from "@/components/dash
 import { ContractEscrowSummary } from "@/components/dashboard/contract-escrow-summary";
 import { EscrowFundingDialog } from "@/components/dashboard/escrow-funding-dialog";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
+import { ContractRevisionHistory } from "@/components/dashboard/contract-revision-history";
 import { calculateFundingBreakdown, formatAssetAmount } from "@/lib/escrow/funding";
 
 interface ProfileInfo {
@@ -242,6 +243,9 @@ export default function ContractDetailPage() {
 
         {/* Contract Activity Timeline */}
         <ActivityTimeline contractId={contract.id} />
+
+        {/* Contract Revision & Change History */}
+        <ContractRevisionHistory contractId={contract.id} />
       </div>
 
       {/* Escrow Funding Dialog */}
