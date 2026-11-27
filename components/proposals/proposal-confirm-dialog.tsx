@@ -16,6 +16,8 @@ interface Props {
   action: "shortlist" | "accept" | "reject" | null;
   freelancerName?: string;
   submitting?: boolean;
+  isSubmitting?: boolean;
+  error?: string | null;
   onCancel: () => void;
   onConfirm: () => void;
 }
@@ -25,13 +27,23 @@ export function ProposalConfirmDialog({
   action,
   freelancerName,
   submitting,
+  isSubmitting,
+  error = null,
   onCancel,
   onConfirm,
 }: Props) {
+  const busy = submitting ?? isSubmitting ?? false;
   const isAccept = action === "accept";
   const isShortlist = action === "shortlist";
+  const name = freelancerName ?? "this freelancer";
+
   return (
-    <AlertDialog open={open} onOpenChange={(o) => !o && onCancel()}>
+    <AlertDialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o && !busy) onCancel();
+      }}
+    >
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
@@ -39,17 +51,33 @@ export function ProposalConfirmDialog({
           </AlertDialogTitle>
           <AlertDialogDescription>
             {isShortlist
-              ? `Shortlist ${freelancerName ?? "this freelancer"}'s proposal for further review.`
+              ? `Shortlist ${name}'s proposal for further review.`
               : isAccept
-              ? `Accepting ${freelancerName ?? "this freelancer"}'s proposal will select it for this project. Only one proposal can be accepted.`
-              : `Reject ${freelancerName ?? "this freelancer"}'s proposal and close it for this project.`}
+              ? `Accepting ${name}'s proposal will select it for this project. Only one proposal can be accepted.`
+              : `Rejecting ${name}'s proposal will notify them and close it for this project.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
         <AlertDialogFooter>
-          <AlertDialogCancel onClick={onCancel}>Cancel</AlertDialogCancel>
-          <AlertDialogAction disabled={submitting} onClick={onConfirm}>
-            {submitting
-              ? "Saving..."
+          <AlertDialogCancel onClick={onCancel} disabled={busy}>
+            Cancel
+          </AlertDialogCancel>
+          <AlertDialogAction
+            onClick={(e) => {
+              e.preventDefault();
+              onConfirm();
+            }}
+            disabled={busy}
+            aria-busy={busy}
+          >
+            {busy
+              ? isAccept
+                ? "Accepting..."
+                : "Rejecting..."
               : isShortlist
               ? "Shortlist"
               : isAccept

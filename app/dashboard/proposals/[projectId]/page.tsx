@@ -33,16 +33,20 @@ export default async function ProposalsPage({
   if (!isClient && !isFreelancer) notFound();
 
   return (
-    <div className="container mx-auto max-w-5xl py-8">
+    <div className="container mx-auto max-w-5xl py-8 px-4">
       <header className="mb-6">
         <h1 className="text-2xl font-semibold">Proposals</h1>
         <p className="text-sm text-muted-foreground">
           {isClient
-            ? "Review, filter, and manage freelancer proposals."
+            ? "Review, compare, shortlist, and manage freelancer proposals."
             : "Your submitted proposals and their status."}
         </p>
       </header>
-      <ProposalList projectId={projectId} readOnly={!isClient} />
+      {isClient ? (
+        <ProposalList projectId={projectId} />
+      ) : (
+        <ProposalList projectId={projectId} readOnly />
+      )}
     </div>
   );
 }

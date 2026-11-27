@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
 import { ProposalCard } from "./proposal-card";
-import { ProposalFiltersBar } from "./proposal-filters";
 import { ProposalConfirmDialog } from "./proposal-confirm-dialog";
 import { ProposalSkeleton } from "./proposal-skeleton";
 import { ProposalEmptyState } from "./proposal-empty-state";
@@ -24,12 +24,16 @@ type ProposalFilters = {
 export function ProposalList({ projectId, readOnly }: Props) {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [filters, setFilters] = useState<ProposalFilters>({
     status: "all",
     sortBy: "recent",
     sortDir: "desc",
     search: "",
   });
+  const [shortlistedIds, setShortlistedIds] = useState<Set<string>>(new Set());
+  const [comparing, setComparing] = useState(false);
   const [pendingAction, setPendingAction] = useState<{
     proposal: Proposal;
     action: "shortlist" | "accept" | "reject";
@@ -92,6 +96,20 @@ export function ProposalList({ projectId, readOnly }: Props) {
       });
   }, [filters.search, filters.sortBy, filters.sortDir, proposals]);
 
+  const compared = useMemo(
+    () => proposals.filter((p) => shortlistedIds.has(p.id)),
+    [proposals, shortlistedIds]
+  );
+
+  function toggleShortlist(p: Proposal) {
+    setShortlistedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(p.id)) next.delete(p.id);
+      else next.add(p.id);
+      return next;
+    });
+  }
+
   async function confirmAction() {
     if (!pendingAction || submissionInProgress.current) return;
     const action = pendingAction.action;
@@ -113,6 +131,11 @@ export function ProposalList({ projectId, readOnly }: Props) {
         await loadProposals();
         return;
       }
+      setShortlistedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(proposal.id);
+        return next;
+      });
       toast.success(action === "shortlist" ? "Proposal shortlisted" : `Proposal ${action}ed`);
       setPendingAction(null);
       await loadProposals();
@@ -126,43 +149,97 @@ export function ProposalList({ projectId, readOnly }: Props) {
     }
   }
 
+  const actionable = !readOnly;
+
   return (
     <div className="space-y-4">
-      <ProposalFiltersBar value={filters} onChange={setFilters} />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <input
+          className="rounded-md border px-3 py-1 text-sm"
+          placeholder="Search proposals"
+          value={filters.search}
+          onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
+        />
+        {actionable && shortlistedIds.size > 0 && (
+          <Button size="sm" onClick={() => setComparing(true)}>
+            Compare shortlist ({shortlistedIds.size})
+          </Button>
+        )}
+      </div>
 
       {loading ? (
-        <div className="space-y-4">
+        <div className="grid gap-4 md:grid-cols-2">
           <ProposalSkeleton />
           <ProposalSkeleton />
           <ProposalSkeleton />
+        </div>
+      ) : error ? (
+        <div className="flex flex-col items-center gap-3 rounded-lg border p-8 text-center">
+          <p className="text-sm text-destructive">{error}</p>
+          <Button size="sm" variant="outline" onClick={() => setReloadKey((k) => k + 1)}>
+            Retry
+          </Button>
         </div>
       ) : proposals.length === 0 ? (
         <ProposalEmptyState
           filtered={filters.status !== "all" || !!filters.search}
         />
+      ) : comparing && actionable ? (
+        <div className="space-y-4">
+          <Button size="sm" variant="outline" onClick={() => setComparing(false)}>
+            Back to proposals
+          </Button>
+          <div className="grid gap-4 md:grid-cols-2">
+            {compared.map((p) => (
+              <ProposalCard
+                key={p.id}
+                proposal={p}
+                readOnly={readOnly || p.status === "accepted" || p.status === "rejected"}
+                disabled={submitting}
+                onShortlist={(prop) => setPendingAction({ proposal: prop, action: "shortlist" })}
+                onAccept={(prop) => setPendingAction({ proposal: prop, action: "accept" })}
+                onReject={(prop) => setPendingAction({ proposal: prop, action: "reject" })}
+                onViewProfile={(prop) => {
+                  window.location.href = `/freelancers/${prop.freelancerId}`;
+                }}
+              />
+            ))}
+          </div>
+        </div>
       ) : visibleProposals.length === 0 ? (
         <ProposalEmptyState filtered />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {visibleProposals.map((p) => (
-            <ProposalCard
-              key={p.id}
-              proposal={p}
-              readOnly={readOnly || p.status === "accepted" || p.status === "rejected"}
-              disabled={submitting}
-              onShortlist={(prop) =>
-                setPendingAction({ proposal: prop, action: "shortlist" })
-              }
-              onAccept={(prop) =>
-                setPendingAction({ proposal: prop, action: "accept" })
-              }
-              onReject={(prop) =>
-                setPendingAction({ proposal: prop, action: "reject" })
-              }
-              onViewProfile={(prop) => {
-                window.location.href = `/freelancers/${prop.freelancerId}`;
-              }}
-            />
+            <div key={p.id} className="space-y-2">
+              <ProposalCard
+                proposal={p}
+                readOnly={readOnly || p.status === "accepted" || p.status === "rejected"}
+                disabled={submitting}
+                onShortlist={(prop) =>
+                  setPendingAction({ proposal: prop, action: "shortlist" })
+                }
+                onAccept={(prop) =>
+                  setPendingAction({ proposal: prop, action: "accept" })
+                }
+                onReject={(prop) =>
+                  setPendingAction({ proposal: prop, action: "reject" })
+                }
+                onViewProfile={(prop) => {
+                  window.location.href = `/freelancers/${prop.freelancerId}`;
+                }}
+              />
+              {actionable && p.status === "pending" && (
+                <Button
+                  variant={shortlistedIds.has(p.id) ? "secondary" : "outline"}
+                  size="sm"
+                  className="w-full"
+                  onClick={() => toggleShortlist(p)}
+                >
+                  {shortlistedIds.has(p.id) ? "Shortlisted ✓ (remove)" : "Add to shortlist"}
+                </Button>
+              )}
+            </div>
           ))}
         </div>
       )}
