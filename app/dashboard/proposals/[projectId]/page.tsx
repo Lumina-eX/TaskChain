@@ -4,7 +4,6 @@ import { db as sql } from "@/lib/proposals/db";
 import { verifyAccessToken } from "@/lib/auth/session";
 import { ACCESS_TOKEN_COOKIE } from "@/lib/auth/constants";
 import { ProposalList } from "@/components/proposals";
-import { ProposalComparison } from "@/components/proposals/proposal-comparison";
 
 export default async function ProposalsPage({
   params,
@@ -44,7 +43,7 @@ export default async function ProposalsPage({
         </p>
       </header>
       {isClient ? (
-        <ProposalComparison projectId={projectId} />
+        <ProposalList projectId={projectId} />
       ) : (
         <ProposalList projectId={projectId} readOnly />
       )}

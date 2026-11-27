@@ -4,8 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { ProposalCard } from "./proposal-card";
-import { ProposalComparison } from "./proposal-comparison";
-import { ProposalFiltersBar } from "./proposal-filters";
 import { ProposalConfirmDialog } from "./proposal-confirm-dialog";
 import { ProposalSkeleton } from "./proposal-skeleton";
 import { ProposalEmptyState } from "./proposal-empty-state";
@@ -156,7 +154,12 @@ export function ProposalList({ projectId, readOnly }: Props) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <ProposalFiltersBar value={filters} onChange={setFilters} />
+        <input
+          className="rounded-md border px-3 py-1 text-sm"
+          placeholder="Search proposals"
+          value={filters.search}
+          onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
+        />
         {actionable && shortlistedIds.size > 0 && (
           <Button size="sm" onClick={() => setComparing(true)}>
             Compare shortlist ({shortlistedIds.size})
@@ -182,15 +185,27 @@ export function ProposalList({ projectId, readOnly }: Props) {
           filtered={filters.status !== "all" || !!filters.search}
         />
       ) : comparing && actionable ? (
-        <ProposalComparison
-          proposals={compared}
-          shortlistedIds={shortlistedIds}
-          readOnly={readOnly}
-          onToggleShortlist={toggleShortlist}
-          onAccept={(p) => setPendingAction({ proposal: p, action: "accept" })}
-          onReject={(p) => setPendingAction({ proposal: p, action: "reject" })}
-          onClose={() => setComparing(false)}
-        />
+        <div className="space-y-4">
+          <Button size="sm" variant="outline" onClick={() => setComparing(false)}>
+            Back to proposals
+          </Button>
+          <div className="grid gap-4 md:grid-cols-2">
+            {compared.map((p) => (
+              <ProposalCard
+                key={p.id}
+                proposal={p}
+                readOnly={readOnly || p.status === "accepted" || p.status === "rejected"}
+                disabled={submitting}
+                onShortlist={(prop) => setPendingAction({ proposal: prop, action: "shortlist" })}
+                onAccept={(prop) => setPendingAction({ proposal: prop, action: "accept" })}
+                onReject={(prop) => setPendingAction({ proposal: prop, action: "reject" })}
+                onViewProfile={(prop) => {
+                  window.location.href = `/freelancers/${prop.freelancerId}`;
+                }}
+              />
+            ))}
+          </div>
+        </div>
       ) : visibleProposals.length === 0 ? (
         <ProposalEmptyState filtered />
       ) : (

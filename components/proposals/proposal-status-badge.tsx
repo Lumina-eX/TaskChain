@@ -2,7 +2,6 @@ import { Badge } from "@/components/ui/badge";
 import type { ProposalStatus } from "@/lib/proposals";
 
 const STYLES: Record<string, string> = {
-  pending: "bg-yellow-100 text-yellow-800 border-yellow-200",
   shortlisted: "bg-purple-100 text-purple-800 border-purple-200",
   submitted: "bg-yellow-100 text-yellow-800 border-yellow-200",
   under_review: "bg-blue-100 text-blue-800 border-blue-200",

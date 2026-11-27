@@ -107,16 +107,6 @@ export function ProposalCard({
           )}
           {canDecide && (
             <>
-              {proposal.status !== "under_review" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={disabled}
-                  onClick={() => onShortlist?.(proposal)}
-                >
-                  Shortlist
-                </Button>
-              )}
               <Button size="sm" disabled={disabled} onClick={() => onAccept?.(proposal)}>
                 Accept
               </Button>

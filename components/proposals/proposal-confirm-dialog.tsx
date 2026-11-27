@@ -15,6 +15,7 @@ interface Props {
   open: boolean;
   action: "shortlist" | "accept" | "reject" | null;
   freelancerName?: string;
+  submitting?: boolean;
   isSubmitting?: boolean;
   error?: string | null;
   onCancel: () => void;
@@ -25,11 +26,13 @@ export function ProposalConfirmDialog({
   open,
   action,
   freelancerName,
-  isSubmitting = false,
+  submitting,
+  isSubmitting,
   error = null,
   onCancel,
   onConfirm,
 }: Props) {
+  const busy = submitting ?? isSubmitting ?? false;
   const isAccept = action === "accept";
   const isShortlist = action === "shortlist";
   const name = freelancerName ?? "this freelancer";
@@ -38,7 +41,7 @@ export function ProposalConfirmDialog({
     <AlertDialog
       open={open}
       onOpenChange={(o) => {
-        if (!o && !isSubmitting) onCancel();
+        if (!o && !busy) onCancel();
       }}
     >
       <AlertDialogContent>
@@ -60,7 +63,7 @@ export function ProposalConfirmDialog({
           </p>
         )}
         <AlertDialogFooter>
-          <AlertDialogCancel onClick={onCancel} disabled={isSubmitting}>
+          <AlertDialogCancel onClick={onCancel} disabled={busy}>
             Cancel
           </AlertDialogCancel>
           <AlertDialogAction
@@ -68,10 +71,10 @@ export function ProposalConfirmDialog({
               e.preventDefault();
               onConfirm();
             }}
-            disabled={isSubmitting}
-            aria-busy={isSubmitting}
+            disabled={busy}
+            aria-busy={busy}
           >
-            {isSubmitting
+            {busy
               ? isAccept
                 ? "Accepting..."
                 : "Rejecting..."
